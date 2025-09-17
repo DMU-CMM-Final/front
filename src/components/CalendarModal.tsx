@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import { useAuth } from '../contexts/AuthContext';
+import { uid } from 'chart.js/dist/helpers/helpers.core';
 
 // --- 타입 정의 ---
 // 컴포넌트에서 사용하는 이벤트 타입. startDate와 endDate를 Date 객체로 정의합니다.
@@ -213,7 +214,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (!newEvent.title) { alert("제목을 입력해주세요."); return; }
     
     const payload = {
-        uid: userEmail,
+        uId: userEmail,
         title: newEvent.title,
         description: newEvent.description,
         isAllDay: newEvent.isAllDay,
@@ -221,6 +222,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         endDate: newEvent.endDate,
     };
     
+    console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
+
     try {
         const response = await fetch(`${API_URL}/spring/calender/new`, {
             method: 'POST',
