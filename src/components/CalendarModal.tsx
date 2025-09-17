@@ -132,9 +132,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (!userEmail) return; 
     setLoading(true);
 
-    /* // --- 실제 API 호출 코드 (주석 처리) ---
+    // --- 실제 API 호출 코드 (주석 처리) ---
     const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-    const url = `${API_URL}/api/calender?uId=${encodeURIComponent(userEmail)}&date=${encodeURIComponent(dateParam)}`;
+    const url = `${API_URL}/spring/calendar?uId=${encodeURIComponent(userEmail)}&date=${encodeURIComponent(dateParam)}`;
     try {
       const response = await fetch(url);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -149,9 +149,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     } catch (error) { console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); } 
     finally { setLoading(false); }
-    */
 
-
+    /*
     // --- 더미 데이터 시작 (테스트 후 이 블록을 삭제하고 위 코드를 주석 해제하세요) ---
     console.log("더미 데이터를 로드합니다.");
     
@@ -178,6 +177,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         setLoading(false);
     }, 500); // 0.5초 딜레이
     // --- 더미 데이터 끝 ---
+    */
 
   }, [userEmail]);
 
@@ -225,7 +225,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
 
     try {
-        const response = await fetch(`${API_URL}/spring/calender/new`, {
+        const response = await fetch(`${API_URL}/spring/calendar/new`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -277,7 +277,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
 
     try {
-      const response = await fetch(`${API_URL}/spring/calender/delete?eventId=${eventId}`, {
+      const response = await fetch(`${API_URL}/spring/calendar/delete?eventId=${eventId}`, {
         method: 'GET' // 명시적으로 GET으로 설정 (기본값이 GET이긴 함)
       });
       if (!response.ok) throw new Error("일정 삭제에 실패했습니다.");
