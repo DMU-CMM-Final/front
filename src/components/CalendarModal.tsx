@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import { useAuth } from '../contexts/AuthContext';
-import { uid } from 'chart.js/dist/helpers/helpers.core';
 
 // --- 타입 정의 ---
 // 컴포넌트에서 사용하는 이벤트 타입. startDate와 endDate를 Date 객체로 정의합니다.
@@ -104,6 +103,13 @@ const toDateTimeLocalString = (date: Date) => {
 };
 const toDateInputString = (date: Date) => toDateTimeLocalString(date).slice(0, 10);
 
+// 서버 전송용 날짜 포맷 함수
+const formatDateTimeForServer = (date: Date) => {
+    const pad = (num: number) => num.toString().padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+
+
 const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { userEmail } = useAuth(); 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -125,20 +131,19 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     return tIdColorMap.get(tId)!;
   }, [tIdColorMap]);
   
-  // ==================================================================
-  // ====================== 주요 변경 사항 ==============================
-  // ==================================================================
   const fetchEvents = useCallback(async (date: Date) => {
     if (!userEmail) return; 
     setLoading(true);
 
-    // --- 실제 API 호출 코드 (주석 처리) ---
     const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
     const url = `${API_URL}/spring/calendar?uId=${encodeURIComponent(userEmail)}&date=${encodeURIComponent(dateParam)}`;
     try {
       const response = await fetch(url);
+
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data: any[] = await response.json();
+
+      console.log("Fetched raw calendar data from API:", data);
       
       const processedEvents: CalendarEvent[] = data.map(event => ({
         ...event,
@@ -149,35 +154,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     } catch (error) { console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); } 
     finally { setLoading(false); }
-
-    /*
-    // --- 더미 데이터 시작 (테스트 후 이 블록을 삭제하고 위 코드를 주석 해제하세요) ---
-    console.log("더미 데이터를 로드합니다.");
-    
-    // 현재 월을 기준으로 동적으로 더미 데이터 생성
-    const currentYear = date.getFullYear();
-    const currentMonth = (date.getMonth() + 1).toString().padStart(2, '0');
-
-    const dummyData = [
-      { eventId: 1, tId: 101, title: "팀 회의", description: "주간 성과 리뷰", startDate: `${currentYear}-${currentMonth}-05T10:00:00`, endDate: `${currentYear}-${currentMonth}-05T11:30:00`, isAllDay: false },
-      { eventId: 2, tId: 102, title: "프로젝트 마감", description: "최종 보고서 제출", startDate: `${currentYear}-${currentMonth}-10T00:00:00`, endDate: `${currentYear}-${currentMonth}-10T23:59:59`, isAllDay: true },
-      { eventId: 3, tId: null, title: "개인 약속", description: "병원 방문", startDate: `${currentYear}-${currentMonth}-15T14:00:00`, endDate: `${currentYear}-${currentMonth}-15T15:00:00`, isAllDay: false },
-      { eventId: 4, tId: 101, title: "장기 프로젝트", description: "1단계 개발 기간", startDate: `${currentYear}-${currentMonth}-18T09:00:00`, endDate: `${currentYear}-${currentMonth}-22T18:00:00`, isAllDay: false },
-      { eventId: 5, tId: 103, title: "워크샵", description: "전사 워크샵", startDate: `${currentYear}-${currentMonth}-25T09:00:00`, endDate: `${currentYear}-${currentMonth}-26T17:00:00`, isAllDay: false },
-    ];
-    
-    // 실제 API 호출처럼 약간의 딜레이를 줍니다.
-    setTimeout(() => {
-        const processedEvents: CalendarEvent[] = dummyData.map(event => ({
-            ...event,
-            startDate: new Date(event.startDate),
-            endDate: new Date(event.endDate)
-        }));
-        setEvents(processedEvents);
-        setLoading(false);
-    }, 500); // 0.5초 딜레이
-    // --- 더미 데이터 끝 ---
-    */
 
   }, [userEmail]);
 
@@ -213,13 +189,31 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     e.preventDefault();
     if (!newEvent.title) { alert("제목을 입력해주세요."); return; }
     
+    let finalStartDate: string;
+    let finalEndDate: string;
+
+    if (newEvent.isAllDay) {
+        // '하루 종일'이 true이면 시간은 00:00:00 ~ 23:59:59로 설정
+        const startOfDay = new Date(newEvent.startDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        finalStartDate = formatDateTimeForServer(startOfDay);
+
+        const endOfDay = new Date(newEvent.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        finalEndDate = formatDateTimeForServer(endOfDay);
+    } else {
+        // '하루 종일'이 false이면 입력된 시간을 그대로 사용
+        finalStartDate = formatDateTimeForServer(newEvent.startDate);
+        finalEndDate = formatDateTimeForServer(newEvent.endDate);
+    }
+
     const payload = {
         uId: userEmail,
         title: newEvent.title,
         description: newEvent.description,
         isAllDay: newEvent.isAllDay,
-        startDate: newEvent.startDate,
-        endDate: newEvent.endDate,
+        startDate: finalStartDate, // 포맷팅된 값으로 변경
+        endDate: finalEndDate,     // 포맷팅된 값으로 변경
     };
     
     console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
@@ -251,25 +245,44 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     e.preventDefault();
     if (!editingEvent) { alert("수정할 일정이 없습니다."); return; }
 
+    // 'isAllDay' 값에 따라 startDate와 endDate를 서버 형식에 맞게 포맷팅합니다.
+    let finalStartDate: string;
+    let finalEndDate: string;
+
+    if (editingEvent.isAllDay) {
+        // '하루 종일'이 true이면 시간은 00:00:00 ~ 23:59:59로 설정합니다.
+        const startOfDay = new Date(editingEvent.startDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        finalStartDate = formatDateTimeForServer(startOfDay);
+
+        const endOfDay = new Date(editingEvent.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        finalEndDate = formatDateTimeForServer(endOfDay);
+    } else {
+        // '하루 종일'이 false이면 입력된 시간을 그대로 사용합니다.
+        finalStartDate = formatDateTimeForServer(editingEvent.startDate);
+        finalEndDate = formatDateTimeForServer(editingEvent.endDate);
+    }
+
     const payload = {
       eventId: editingEvent.eventId,
       uId: userEmail,
       title: editingEvent.title,
       description: editingEvent.description,
-      startDate: editingEvent.startDate,
-      endDate: editingEvent.endDate,
       isAllDay: editingEvent.isAllDay,
+      startDate: finalStartDate, // 포맷팅된 값으로 변경
+      endDate: finalEndDate,     // 포맷팅된 값으로 변경
     };
 
     try {
-      const response = await fetch(`${API_URL}/spring/calender/update`, {
+      const response = await fetch(`${API_URL}/spring/calendar/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       if (!response.ok) throw new Error("일정 수정에 실패했습니다.");
-      setEditingEvent(null); // 수정 모드 종료
-      await fetchEvents(activeDate); // 최신 정보로 캘린더 새로고침
+      setEditingEvent(null);
+      await fetchEvents(activeDate);
     } catch (error) { console.error(error); alert(String(error)); }
   };
 
@@ -278,11 +291,11 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     try {
       const response = await fetch(`${API_URL}/spring/calendar/delete?eventId=${eventId}`, {
-        method: 'GET' // 명시적으로 GET으로 설정 (기본값이 GET이긴 함)
+        method: 'GET'
       });
       if (!response.ok) throw new Error("일정 삭제에 실패했습니다.");
-      setSelectedDate(null); // 우측 패널 닫기
-      await fetchEvents(activeDate); // 최신 정보로 캘린더 새로고침
+      setSelectedDate(null);
+      await fetchEvents(activeDate);
     } catch (error) { console.error(error); alert(String(error)); }
   };
 
@@ -290,7 +303,17 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleDateClick = (date: Date) => {
     const dayStart = new Date(date); dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(date); dayEnd.setHours(23, 59, 59, 999);
-    const hasEvents = events.some(event => event.startDate <= dayEnd && event.endDate >= dayStart);
+    const hasEvents = events.some(event => {
+      if (event.isAllDay) {
+        const eventStartDay = new Date(event.startDate);
+        eventStartDay.setHours(0, 0, 0, 0);
+        const eventEndDay = new Date(event.endDate);
+        eventEndDay.setHours(0, 0, 0, 0);
+        return dayStart >= eventStartDay && dayStart <= eventEndDay;
+      } else {
+        return event.startDate <= dayEnd && event.endDate >= dayStart;
+      }
+    });
     if (hasEvents) { 
       setSelectedDate(date); 
       setIsAddingEvent(false); 
@@ -300,16 +323,47 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   
   const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
     if (view !== 'month') return null;
-    const dayStart = new Date(date); dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(date); dayEnd.setHours(23, 59, 59, 999);
-    const dayEvents = events.filter(event => event.startDate <= dayEnd && event.endDate >= dayStart);
+    const dayEvents = events.filter(event => {
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      if (event.isAllDay) {
+        // '하루 종일' 이벤트: 시간은 무시하고 날짜만으로 포함 여부를 확인합니다.
+        const eventStartDay = new Date(event.startDate);
+        eventStartDay.setHours(0, 0, 0, 0);
+        const eventEndDay = new Date(event.endDate);
+        eventEndDay.setHours(0, 0, 0, 0);
+        // 현재 날짜(dayStart)가 이벤트 기간(eventStartDay ~ eventEndDay)에 포함되는지 확인
+        return dayStart >= eventStartDay && dayStart <= eventEndDay;
+      } else {
+        // 시간이 지정된 이벤트: 기존 로직대로 시간이 겹치는지 확인합니다.
+        return event.startDate <= dayEnd && event.endDate >= dayStart;
+      }
+    });
     return ( <>{dayEvents.slice(0, 2).map(event => (<EventHighlighter key={event.eventId} color={getColorForTId(event.tId)} opacity={event.isAllDay ? 1 : 0.5} title={event.title}>{event.title}</EventHighlighter>))}</> );
   };
   
   const selectedDayEvents = selectedDate ? events.filter(event => {
-      const dayStart = new Date(selectedDate); dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(selectedDate); dayEnd.setHours(23, 59, 59, 999);
-      return event.startDate <= dayEnd && event.endDate >= dayStart;
+      // '하루 종일' 이벤트가 우측 패널에 정상적으로 표시되도록 필터링 로직을 수정합니다.
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      if (event.isAllDay) {
+        // '하루 종일' 이벤트: 시간은 무시하고 날짜만으로 포함 여부를 확인합니다.
+        const eventStartDay = new Date(event.startDate);
+        eventStartDay.setHours(0, 0, 0, 0);
+        const eventEndDay = new Date(event.endDate);
+        eventEndDay.setHours(0, 0, 0, 0);
+        // 선택된 날짜(dayStart)가 이벤트 기간(eventStartDay ~ eventEndDay)에 포함되는지 확인
+        return dayStart >= eventStartDay && dayStart <= eventEndDay;
+      } else {
+        // 시간이 지정된 이벤트: 기존 로직대로 시간이 겹치는지 확인합니다.
+        return event.startDate <= dayEnd && event.endDate >= dayStart;
+      }
   }) : [];
 
   if (!isOpen) return null;
@@ -395,7 +449,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <h4>{event.title}</h4>
                     <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} ~ ${event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}</p>
                     <p><strong>상세:</strong><br />{event.description}</p>
-                    {/* --- ✨ 수정/삭제 버튼 추가 --- */}
                     <DetailButtonContainer>
                       <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
                       <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
