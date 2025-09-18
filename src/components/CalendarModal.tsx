@@ -290,7 +290,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
 
     try {
-      const response = await fetch(`${API_URL}/spring/calendar/delete?eventId=${eventId}`, {
+      const response = await fetch(`${API_URL}/spring/calendar/delete?id=${eventId}`, {
         method: 'GET'
       });
       if (!response.ok) throw new Error("일정 삭제에 실패했습니다.");
