@@ -19,11 +19,16 @@ const COLOR = {
 const API_URL = process.env.REACT_APP_API_URL;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+interface InvitedMember {
+  email: string;
+  mid: number;
+}
+
 const Create: React.FC = () => {
   const [modalStep, setModalStep] = useState<1 | 2>(1);
   const [teamName, setTeamName] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
-  const [emails, setEmails] = useState<string[]>([]);
+  const [invitedMembers, setInvitedMembers] = useState<InvitedMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [tid, setTid] = useState<number | null>(null);
   const navigate = useNavigate();
@@ -85,7 +90,7 @@ const Create: React.FC = () => {
       alert("이메일 형식을 지켜주세요!");
       return;
     }
-    if (emails.length >= 3) {
+    if (invitedMembers.length >= 3) {
       alert("팀원은 최대 3명까지 추가할 수 있습니다.");
       return;
     }
@@ -114,11 +119,13 @@ const Create: React.FC = () => {
         })
       });
 
-      const result: boolean = await response.json();
+      const text = await response.text();
+      const mid = parseInt(text, 10);
 
-      if (result === true) {
+      if (!isNaN(mid) && mid !== 0) {
         alert("팀원 요청 성공!");
-        setEmails([...emails, memberEmail]);
+        // invitedMembers 상태에 새 팀원 정보(email과 mid)를 추가합니다.
+        setInvitedMembers([...invitedMembers, { email: memberEmail, mid: mid }]);
         setMemberEmail("");
       } else {
         alert("팀원 요청에 실패했습니다.");
@@ -148,7 +155,7 @@ const Create: React.FC = () => {
           uid: emailToDelete
         })
       });
-      setEmails(emails.filter((email) => email !== emailToDelete));
+      setInvitedMembers(invitedMembers.filter((member) => member.email !== emailToDelete));
       alert("팀원 요청이 취소되었습니다!");
     } catch (error) {
       alert("서버와의 통신에 실패했습니다.");
@@ -199,13 +206,13 @@ const Create: React.FC = () => {
                   placeholder="이메일 입력"
                   value={memberEmail}
                   onChange={e => setMemberEmail(e.target.value)}
-                  disabled={emails.length >= 3 || loading}
+                  disabled={invitedMembers.length >= 3 || loading}
                 />
                 <AddButton
                   onClick={handleEmailConfirm}
                   disabled={
                     !memberEmail.trim() ||
-                    emails.length >= 3 ||
+                    invitedMembers.length >= 3 ||
                     loading
                   }
                 >
@@ -213,11 +220,11 @@ const Create: React.FC = () => {
                 </AddButton>
               </InputRow>
               <EmailList>
-                {emails.map((email, idx) => (
-                  <EmailItem key={idx}>
-                    <span>{email}</span>
+                {invitedMembers.map((member) => (
+                  <EmailItem key={member.mid}>
+                    <span>{member.email}</span>
                     <DeleteButton
-                      onClick={() => handleDeleteEmail(email)}
+                      onClick={() => handleDeleteEmail(member.email)}
                       disabled={loading}
                       title="팀원 삭제"
                     >
@@ -226,13 +233,13 @@ const Create: React.FC = () => {
                   </EmailItem>
                 ))}
               </EmailList>
-              {emails.length >= 3 && (
+              {invitedMembers.length >= 3 && (
                 <MaxNotice>팀원은 최대 3명까지 추가할 수 있습니다.</MaxNotice>
               )}
               <ButtonRow>
                 <MainButton
                   onClick={() => navigate("/team")}
-                  disabled={emails.length === 0}
+                  disabled={invitedMembers.length === 0}
                 >
                   완료
                 </MainButton>

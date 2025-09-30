@@ -1,6 +1,6 @@
 import React, {useState} from "react";
 import styled from "styled-components";
-import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import 'react-calendar/dist/Calendar.css';
 import Login from "./login/login"; // login.tsx 파일 import
 import Header from "./header"; // header.tsx 파일 import
@@ -57,6 +57,9 @@ const AppContent: React.FC = () => {
   const { isLoggedIn } = useAuth(); 
   const navigate = useNavigate(); // 페이지 이동을 위한 navigate 훅 사용
 
+  const location = useLocation();
+  const isTeamPage = location.pathname === '/team';
+
   // 모달을 여는 함수
   const handleOpenCalendar = () => {
     if (isLoggedIn) { // 1. 로그인 상태 확인
@@ -75,7 +78,7 @@ const AppContent: React.FC = () => {
   
   return (
     <>
-      <FloatingButton onClick={handleOpenCalendar} />
+      {!isTeamPage && <FloatingButton onClick={handleOpenCalendar} />}
       <CalendarModal isOpen={isCalendarOpen} onClose={handleCloseCalendar} />
       <Routes>
         <Route path="/" element={<MainComponent />} />

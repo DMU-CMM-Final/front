@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import styled from "styled-components";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
+import CalendarModal from "./components/CalendarModal";
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -17,6 +18,7 @@ type TeamData = {
 };
 
 type MessageData = {
+  mid: number;
   tid: number;
   uid: string;
   uname: string;       // 받는 사람 이름 (추가)
@@ -42,6 +44,9 @@ const ProjectList: React.FC = () => {
   const mailIconRef = useRef<HTMLSpanElement>(null);
   const [editingTeam, setEditingTeam] = useState<EditingTeamInfo | null>(null);
   const modificationMenuRef = useRef<HTMLDivElement>(null);
+  const [isCalendarOpen, setCalendarOpen] = useState(false);
+  const openCalendar = () => setCalendarOpen(true);
+  const closeCalendar = () => setCalendarOpen(false);
 
   // 팀 목록 가져오기
   const fetchTeams = useCallback(async () => {
@@ -133,6 +138,7 @@ const ProjectList: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mid: message.mid,
           tid: message.tid,        // 팀 ID
           uid: message.senduid,    // 초대를 보낸 사람의 ID
           senduid: userEmail,      // 응답하는 사람(현재 로그인한 유저)의 ID
@@ -272,6 +278,7 @@ const ProjectList: React.FC = () => {
 
   return (
     <Container>
+      <CalendarModal isOpen={isCalendarOpen} onClose={closeCalendar} />
       <HeaderBar>
         <Logo onClick={() => navigate("/")}>BlankSync</Logo>
         <RecentTitle>최근 프로젝트</RecentTitle>
@@ -320,8 +327,8 @@ const ProjectList: React.FC = () => {
                 {messages.length === 0 ? (
                   <NoMessage>받은 메시지가 없습니다.</NoMessage>
                 ) : (
-                  messages.map((message, idx) => (
-                    <MessageItem key={idx}>
+                  messages.map((message) => (
+                    <MessageItem key={message.mid}>
                       <div>
                         {/* content 값에 따라 다른 메시지 표시 */}
                         {message.content === 1 ? (
@@ -330,17 +337,27 @@ const ProjectList: React.FC = () => {
                             <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 회원님을 팀원으로 요청하였습니다.
                           </>
                         ) : message.content === 3 ? (
-                          // 팀 탈퇴 알림 (content: 3) - 새로 추가된 부분
+                          // 일정 생성 알림 (content: 3)
+                          <>
+                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 생성하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 4 ? (
+                          // 일정 수정 알림 (content: 4)
+                          <>
+                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 수정하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 5 ? (
+                          // 일정 삭제 알림 (content: 5)
+                          <>
+                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 삭제하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 6 ? (
+                          // 팀 탈퇴 알림 (content: 6)
                           <>
                             <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에서 나갔습니다.
-                            <DismissButton onClick={() => handleDismiss(message)}>
-                              ×
-                            </DismissButton>
-                          </>
-                        ) : message.content === 3 ? (
-                          // 팀 탈퇴 알림 (content: 3) - 새로 추가된 부분
-                          <>
-                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에서 나갔습니다.
                             <DismissButton onClick={() => handleDismiss(message)}>
                               ×
                             </DismissButton>
@@ -366,6 +383,13 @@ const ProjectList: React.FC = () => {
                           </ModalButton>
                           <ModalButton onClick={() => handleChoice(false, message)}>
                             거절하기
+                          </ModalButton>
+                        </ModalButtonRow>
+                      )}
+                      {[3, 4, 5].includes(message.content) && (
+                        <ModalButtonRow>
+                          <ModalButton onClick={openCalendar}>
+                            캘린더 보러가기
                           </ModalButton>
                         </ModalButtonRow>
                       )}

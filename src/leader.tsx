@@ -345,8 +345,10 @@ const Leader: React.FC = () => {
           senduid: currentUserEmail,
         }),
       });
-      const result = await response.json();
-      if (result === true) {
+      const text = await response.text();
+      const mid = parseInt(text, 10);
+
+      if (!isNaN(mid) && mid !== 0) {
         alert("팀원 요청 성공!");
         setNewlyInvitedEmails([...newlyInvitedEmails, memberEmail]);
         setMemberEmail("");
