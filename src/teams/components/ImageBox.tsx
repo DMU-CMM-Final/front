@@ -118,7 +118,7 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
           onMouseDown={() => bringToFront(idx)}
           onBlur={() => setFocusedImageIdx(cur => (cur === idx ? null : cur))}
         >
-          <img src={`https://blanksync.kro.kr/node/api/image/${img.node}/${img.pId}/${img.tId}`} alt="" style={{ width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} draggable={false} />
+          <img src={`https://blanksync.o-r.kr/node/api/image/${img.node}/${img.pId}/${img.tId}`} alt="" style={{ width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} draggable={false} />
           {focusedImageIdx === idx && (
             <>
               <ButtonGroup>
