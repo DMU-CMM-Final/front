@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import Draggable from 'react-draggable';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 // --- 스타일 컴포넌트 import ---
 import {
@@ -23,10 +24,21 @@ import VoteBoxes from "./components/voteBox";
 import ImageBoxes from "./components/ImageBox";
 import { VideoGrid } from './components/VideoGrid';
 import SummaryModal from './components/SummaryModal';
+import Calendar from './components/Calendar';
+import CalendarModal from './components/CalendarModal';
 
-const SOCKET_URL = "https://blanksync.o-r.kr";
+// 캘린더 이벤트 타입
+interface CalendarEvent {
+  eventId: number;
+  tId: number | null;
+  title: string;
+  description: string;
+  startDate: Date;
+  endDate: Date;
+  isAllDay: boolean;
+}
 
-// 타입 정의
+// 기타 타입 정의
 interface Project { pId: number; pName: string; createDate: string; }
 interface Participant { id: string; color: string; }
 interface TextBox {
@@ -51,6 +63,7 @@ const generateColor = (id: string) => {
 };
 
 const Teams: React.FC = () => {
+  const { userEmail } = useAuth();
   const mainAreaRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +96,11 @@ const Teams: React.FC = () => {
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [summaryContent, setSummaryContent] = useState('');
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
-  
+
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [miniCalDate, setMiniCalDate] = useState(new Date());
+
   const { socket } = useSocketManager(String(teamId), userId);
   const socketRef = useRef<Socket | null>(null);
   useEffect(() => { socketRef.current = socket; }, [socket]);
@@ -95,6 +112,44 @@ const Teams: React.FC = () => {
   const otherParticipants = participants.filter(p => p.id !== userId);
 
   const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
+
+  useEffect(() => {
+    if (!socket || !teamId) {
+      setCalendarEvents([]);
+      return;
+    }
+
+    const fetchCalendarEvents = (date: Date) => {
+      const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+      socket.emit('calendar-init', { tId: teamId, date: dateParam });
+    };
+
+    fetchCalendarEvents(miniCalDate);
+
+    const handleCalendarData = (data: any) => {
+      const eventList = (data && Array.isArray(data.events)) ? data.events : [];
+      const processedEvents: CalendarEvent[] = eventList.map((event: any) => ({
+        ...event,
+        startDate: new Date(event.startDate),
+        endDate: new Date(event.endDate)
+      }));
+      setCalendarEvents(processedEvents);
+    };
+
+    const handleRealtimeUpdate = () => fetchCalendarEvents(miniCalDate);
+
+    socket.on('calendar-data', handleCalendarData);
+    socket.on('calendar-event-new', handleRealtimeUpdate);
+    socket.on('calendar-event-updated', handleRealtimeUpdate);
+    socket.on('calendar-event-deleted', handleRealtimeUpdate);
+
+    return () => {
+      socket.off('calendar-data', handleCalendarData);
+      socket.off('calendar-event-new', handleRealtimeUpdate);
+      socket.off('calendar-event-updated', handleRealtimeUpdate);
+      socket.off('calendar-event-deleted', handleRealtimeUpdate);
+    };
+  }, [socket, teamId, miniCalDate]);
 
   const handleAttributeChange = (attribute: 'size' | 'color' | 'font', value: any) => {
     setTextBoxes(prev => {
@@ -159,10 +214,6 @@ const Teams: React.FC = () => {
         }
         if (data.projects) {
             setProjects(data.projects);
-            const currentProject = data.projects.find(p => p.pId === teamId);
-            if (currentProject) {
-                setSelectedProjectId(currentProject.pId);
-            }
         }
     };
     
@@ -291,39 +342,54 @@ const Teams: React.FC = () => {
     return Math.max(textMax, voteMax, imageMax);
   };
   
+  // ✅ [수정] 메인 로직 전체 수정
   const handleMainAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // 다른 객체가 아닌 MainArea 자신을 클릭했을 때만 포커스를 해제합니다.
     if (e.target === mainAreaRef.current) {
       setFocusedIdx(null);
       setFocusedImageIdx(null);
       setFocusedVoteIdx(null);
     }
       
-    if (!mainAreaRef.current || !socket || e.target !== mainAreaRef.current || !selectedProjectId) return;
+    // 기본적인 실행 조건 확인
+    if (!mainAreaRef.current || !socket || !selectedProjectId) return;
+
     const rect = mainAreaRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // if-else if 구조로 하나의 동작만 실행되도록 보장
     if (isTextMode) {
-      setIsTextMode(false);
-      const tempNodeId = `optimistic-${Date.now()}`;
-      const optimisticBox: TextBox = {
-          node: tempNodeId,
-          tId: String(teamId),
-          pId: selectedProjectId, uId: userId,
-          x, y, width: 200, height: 40, text: "", color: "#000000", font: "Arial", size: 16,
-          isOptimistic: true
-      };
-      setTextBoxes(prev => [...prev, optimisticBox]);
-      setFocusedIdx(textBoxes.length);
-      socket.emit("textEvent", { 
-          fnc: "new", type: "text", pId: selectedProjectId, 
-          cLocate: { x, y }, cScale: { width: 200, height: 40 }, 
-          cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
-          tempNodeId: tempNodeId
-      });
-    }
-    if (isVoteCreateMode) {
-      socket.emit("voteEvent", { fnc: "new", type: "vote", pId: selectedProjectId, cLocate: { x, y }, cScale: { width: 300, height: 200 }, cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] });
-      setIsVoteCreateMode(false);
+      // 빈 공간(배경)을 클릭했을 때만 생성
+      if (e.target === mainAreaRef.current) {
+        setIsTextMode(false); // 생성 후 텍스트 모드 비활성화
+        const tempNodeId = `optimistic-${Date.now()}`;
+        const optimisticBox: TextBox = {
+            node: tempNodeId,
+            tId: String(teamId),
+            pId: selectedProjectId, uId: userId,
+            x, y, width: 200, height: 40, text: "", color: "#000000", font: "Arial", size: 16,
+            isOptimistic: true
+        };
+        setTextBoxes(prev => [...prev, optimisticBox]);
+        setFocusedIdx(textBoxes.length);
+        socket.emit("textEvent", { 
+            fnc: "new", type: "text", pId: selectedProjectId, 
+            cLocate: { x, y }, cScale: { width: 200, height: 40 }, 
+            cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
+            tempNodeId: tempNodeId
+        });
+      }
+    } else if (isVoteCreateMode) {
+      // 빈 공간(배경)을 클릭했을 때만 생성
+      if (e.target === mainAreaRef.current) {
+        setIsVoteCreateMode(false); // 생성 후 투표 모드 비활성화
+        socket.emit("voteEvent", { 
+          fnc: "new", type: "vote", pId: selectedProjectId, 
+          cLocate: { x, y }, cScale: { width: 300, height: 200 }, 
+          cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] 
+        });
+      }
     }
   };
   
@@ -338,7 +404,7 @@ const Teams: React.FC = () => {
     formData.append("cLocate", JSON.stringify({ x: 100, y: 100 }));
     formData.append("cScale", JSON.stringify({ width: 200, height: 200 }));
     try {
-      await fetch(`${SOCKET_URL}/node/api/image/upload`, { method: "POST", body: formData });
+      await fetch(`https://blanksync.o-r.kr/node/api/image/upload`, { method: "POST", body: formData });
     } catch (err) {
       console.error(err);
     }
@@ -355,9 +421,10 @@ const Teams: React.FC = () => {
           <h2>프로젝트 목록</h2>
           <Spacer />
           <ParticipantContainer 
-            onClick={() => setIsUserListExpanded(prev => !prev)}
+            onMouseEnter={() => setIsUserListExpanded(true)}
+            onMouseLeave={() => setIsUserListExpanded(false)}
           >
-            {otherParticipants.map((user, index) => (
+            {otherParticipants.slice(0, 4).map((user, index) => (
               <OverlapAvatarWrapper key={user.id} index={index}>
                   <UserAvatar color={user.color}>
                       {user.id.charAt(0).toUpperCase()}
@@ -366,7 +433,7 @@ const Teams: React.FC = () => {
             ))}
             {isUserListExpanded && (
               <ExpandedUserList>
-                {otherParticipants.map(user => (
+                {participants.map(user => (
                   <UserListItem key={user.id}>
                     <UserAvatar color={user.color}>
                       {user.id.charAt(0).toUpperCase()}
@@ -407,6 +474,13 @@ const Teams: React.FC = () => {
             </ProjectItem>
           ))}
         </ProjectList>
+        
+        <Calendar 
+          onClick={() => setIsCalendarModalOpen(true)}
+          events={calendarEvents}
+          onMonthChange={setMiniCalDate}
+        />
+
         <CreateProjectButton onClick={handleCreateProject}>+ 새 프로젝트 생성</CreateProjectButton>
       </SidebarContainer>
 
@@ -428,9 +502,10 @@ const Teams: React.FC = () => {
               <FloatingToolbar ref={toolbarRef}>
                 {focusedIdx === null ? (
                   <>
-                    <ToolIcon onClick={() => setIsTextMode(prev => !prev)} title="텍스트 상자 생성"><p style={{fontWeight: isTextMode ? 'bold' : 'normal'}}>T</p></ToolIcon>
-                    <ToolIcon onClick={() => fileInputRef.current?.click()}><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
-                    <ToolIcon><PenIcon /></ToolIcon>
+                    {/* ✅ [수정] 텍스트 버튼 클릭 시 다른 모드 비활성화 */}
+                    <ToolIcon onClick={() => { setIsTextMode(prev => !prev); setIsVoteCreateMode(false); }} title="텍스트 상자 생성">T</ToolIcon>
+                    <ToolIcon onClick={() => fileInputRef.current?.click()} title="이미지 추가"><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
+                    <ToolIcon title="그리기"><PenIcon /></ToolIcon>
                   </>
                 ) : (
                   currentBox && (
@@ -489,7 +564,8 @@ const Teams: React.FC = () => {
             <FloatingButtonWrap>
               {showCreateMenu && (
               <CreateMenu>
-                  <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setShowCreateMenu(false); }}>투표</CreateMenuButton>
+                  {/* ✅ [수정] 투표 버튼 클릭 시 다른 모드 비활성화 */}
+                  <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setIsTextMode(false); setShowCreateMenu(false); }}>투표</CreateMenuButton>
                   <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
                   <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
               </CreateMenu>
@@ -509,6 +585,15 @@ const Teams: React.FC = () => {
           </>
         )}
       </MainArea>
+
+      <CalendarModal 
+        isOpen={isCalendarModalOpen} 
+        onClose={() => setIsCalendarModalOpen(false)} 
+        socket={socket}
+        teamId={teamId}
+        initialEvents={calendarEvents}
+        initialDate={miniCalDate}
+      />
     </Container>
   );
 };
