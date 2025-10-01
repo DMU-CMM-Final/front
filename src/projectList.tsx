@@ -175,8 +175,7 @@ const ProjectList: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uid: userEmail,      // 현재 로그인한 사용자의 ID
-          tid: message.tid,    // 삭제할 메시지의 팀 ID
+          mid: message.mid,
         }),
       });
 

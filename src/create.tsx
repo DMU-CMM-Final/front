@@ -138,24 +138,20 @@ const Create: React.FC = () => {
   };
 
   // 팀원 삭제(POST /message/delete)
-  const handleDeleteEmail = async (emailToDelete: string) => {
-    if (tid === null) {
-      alert("팀 ID가 없습니다.");
-      return;
-    }
+  const handleDeleteEmail = async (midToDelete: number) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/message/delete`, {
+      await fetch(`${API_URL}/spring/api/teams/message/delete`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          tid: tid,
-          uid: emailToDelete
+          mid: midToDelete,
         })
       });
-      setInvitedMembers(invitedMembers.filter((member) => member.email !== emailToDelete));
+      // 상태를 업데이트할 때도 email이 아닌 mid를 기준으로 필터링합니다.
+      setInvitedMembers(invitedMembers.filter((member) => member.mid !== midToDelete));
       alert("팀원 요청이 취소되었습니다!");
     } catch (error) {
       alert("서버와의 통신에 실패했습니다.");
@@ -224,7 +220,7 @@ const Create: React.FC = () => {
                   <EmailItem key={member.mid}>
                     <span>{member.email}</span>
                     <DeleteButton
-                      onClick={() => handleDeleteEmail(member.email)}
+                      onClick={() => handleDeleteEmail(member.mid)}
                       disabled={loading}
                       title="팀원 삭제"
                     >
