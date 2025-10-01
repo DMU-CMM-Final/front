@@ -338,19 +338,19 @@ const ProjectList: React.FC = () => {
                         ) : message.content === 3 ? (
                           // 일정 생성 알림 (content: 3)
                           <>
-                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 생성하였습니다.
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 생성하였습니다.
                             <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
                           </>
                         ) : message.content === 4 ? (
                           // 일정 수정 알림 (content: 4)
                           <>
-                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 수정하였습니다.
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 수정하였습니다.
                             <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
                           </>
                         ) : message.content === 5 ? (
                           // 일정 삭제 알림 (content: 5)
                           <>
-                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에 팀일정을 삭제하였습니다.
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 삭제하였습니다.
                             <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
                           </>
                         ) : message.content === 6 ? (
