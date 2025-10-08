@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 interface CalendarEvent {
   eventId: number;
   tId: number | null;
+  tname?: string;
   title: string;
   description: string;
   startDate: Date;
@@ -39,6 +40,7 @@ const RightPanelContainer = styled.div`
   min-height: 520px; /* 캘린더 높이와 유사하게 최소 높이 설정 */
   display: flex;
   flex-direction: column;
+  position: relative;
 `;
 const EventDetailCard = styled.div`
   margin-bottom: 15px; padding: 10px; border-radius: 8px; background-color: #f9f9f9; border: 1px solid #eee;
@@ -87,7 +89,6 @@ const EventHighlighter = styled.div<{ color: string; opacity: number }>`
   color: #111; padding: 0 4px; margin-bottom: 2px; border-radius: 3px; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
 `;
 
-// 수정된 부분: 공휴일 이름을 표시하기 위한 스타일 컴포넌트 추가
 const HolidayName = styled.div`
   color: #d93b3b;
   font-size: 0.8rem;
@@ -132,6 +133,42 @@ const AddEventButton = styled(ActionButton)`
   margin-top: 16px;
 `;
 
+const SearchIcon = styled.div`
+  position: absolute; 
+  top: 0px; /* 수정된 부분: 패널의 최상단에 맞춤 */
+  right: 0px; /* 수정된 부분: 패널의 우측 끝에 맞춤 */
+  font-size: 1.5rem; 
+  cursor: pointer;
+  padding: 5px; 
+  line-height: 1; 
+  &:hover { opacity: 0.7; }
+  z-index: 10; /* 다른 요소 위에 표시되도록 z-index 추가 */
+`;
+const SearchContainer = styled.div`
+  padding: 10px; border-bottom: 1px solid #eee;
+`;
+const SearchInput = styled.input`
+  width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;
+  box-sizing: border-box;
+`;
+const TeamListContainer = styled.div`
+  max-height: 150px; overflow-y: auto; padding: 5px 0;
+`;
+const TeamButton = styled.button`
+  width: 100%; text-align: left; padding: 8px 12px;
+  border: none; background-color: transparent; cursor: pointer;
+  border-radius: 4px;
+  &:hover { background-color: #f0f0f0; }
+`;
+const FilterInfoContainer = styled.div`
+  padding: 10px; background-color: #f0f8ff; border-radius: 5px;
+  margin-bottom: 15px; font-size: 0.9rem;
+  display: flex; justify-content: space-between; align-items: center;
+`;
+const ClearFilterButton = styled.button`
+  background: none; border: none; color: #007bff; cursor: pointer;
+  text-decoration: underline; font-size: 0.9rem;
+`;
 
 // --- 헬퍼 함수 ---
 interface Props { isOpen: boolean; onClose: () => void; }
@@ -181,12 +218,15 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
 
+  const [isSearching, setIsSearching] = useState(false); // 검색창 표시 여부
+  const [searchTerm, setSearchTerm] = useState(''); // 검색어
+  const [activeFilterTName, setActiveFilterTName] = useState<string | null>(null); // 현재 적용된 팀 필터 이름
+
   const [newEvent, setNewEvent] = useState({
     title: '', description: '', startDate: new Date(),
     endDate: new Date(Date.now() + 60 * 60 * 1000), isAllDay: false
   });
 
-    // 수정된 부분: 모달이 열렸을 때 배경 스크롤을 막는 useEffect
     useEffect(() => {
         if (isOpen) {
             document.body.style.overflow = 'hidden';
@@ -198,12 +238,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     }, [isOpen]); // isOpen 상태가 바뀔 때마다 실행
 
   const getColorForTId = useCallback((tId: number | null): string => {
-    // tId가 null, undefined, 0 등 'falsy' 값일 경우 개인 일정으로 간주하고 고정 색상을 반환합니다.
-    // 기존의 `tId === null` 조건은 tId가 0일 때를 처리하지 못하는 문제가 있었습니다.
     if (!tId) {
       return '#B8B6F2';
     }
-    // tId가 유효한 숫자일 경우, 팀별 고유 색상을 생성하여 반환합니다.
     return generateDeterministicColor(tId);
   }, []);
 
@@ -224,6 +261,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       const processedEvents: CalendarEvent[] = data.map((event: any) => ({
         ...event,
         tId: event.tid, // 소문자 tid를 카멜케이스 tId에 할당
+        tname: event.tname,
         startDate: new Date(event.startDate),
         endDate: new Date(event.endDate)
       }));
@@ -240,18 +278,15 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       setSelectedDate(null);
       setIsAddingEvent(false);
       setEditingEvent(null);
+      setIsSearching(false);
+      setSearchTerm('');
+      setActiveFilterTName(null);
     }
   }, [isOpen, activeDate, fetchEvents]);
 
-  // 새 일정 추가 시, 선택된 날짜를 초기화하지 않도록 setSelectedDate(null) 코드를 제거합니다.
   const handleShowAddForm = () => {
     setIsAddingEvent(true);
-
-    // 사용자가 선택한 날짜가 있으면 그 날짜를, 없으면 오늘을 기본 날짜로 사용합니다.
     const baseDate = selectedDate ? new Date(selectedDate) : new Date();
-
-    // 새 일정의 시간은 현재 시간으로 기본 설정합니다.
-    // (사용자가 날짜만 클릭했을 경우 시간은 00:00이므로 현재 시간으로 보정)
     const currentTime = new Date();
     baseDate.setHours(currentTime.getHours(), currentTime.getMinutes());
 
@@ -393,57 +428,75 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setSelectedDate(date);
     setIsAddingEvent(false);
     setEditingEvent(null);
+    setIsSearching(false);
   };
 
-    // 수정된 부분: 공휴일 이름을 표시하도록 renderTileContent 함수 수정
-    const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
-        if (view !== 'month') return null;
+  const filteredEvents = useMemo(() => {
+    if (!activeFilterTName) {
+      return events; // 적용된 필터가 없으면 모든 일정을 반환
+    }
+    // activeFilterTName과 일치하는 팀 이름을 가진 일정만 필터링하여 반환
+    return events.filter(event => event.tname === activeFilterTName);
+  }, [events, activeFilterTName]);
 
-        // 공휴일 정보를 가져옵니다.
-        const holidayInfo = hd.isHoliday(date);
-        const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
+  const allTeamNames = useMemo(() => {
+    const teamNames = new Set<string>();
+    events.forEach(event => {
+      if (event.tname) {
+        teamNames.add(event.tname);
+      }
+    });
+    return Array.from(teamNames).sort(); // 알파벳 순으로 정렬
+  }, [events]);
 
-        const dayEvents = events.filter(event => {
-            const dayStart = new Date(date);
-            dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(date);
-            dayEnd.setHours(23, 59, 59, 999);
+  const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
+      if (view !== 'month') return null;
 
-            if (event.isAllDay) {
-                const eventStartDay = new Date(event.startDate);
-                eventStartDay.setHours(0, 0, 0, 0);
-                const eventEndDay = new Date(event.endDate);
-                eventEndDay.setHours(0, 0, 0, 0);
-                return dayStart >= eventStartDay && dayStart <= eventEndDay;
-            } else {
-                return event.startDate <= dayEnd && event.endDate >= dayStart;
-            }
-        });
+      // 공휴일 정보를 가져옵니다.
+      const holidayInfo = hd.isHoliday(date);
+      const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
 
-        // 공휴일이 있으면 이벤트는 하나만 표시하여 공간을 확보합니다.
-        const maxEventsToShow = isPublicHoliday ? 1 : 2;
+      const dayEvents = filteredEvents.filter(event => {
+          const dayStart = new Date(date);
+          dayStart.setHours(0, 0, 0, 0);
+          const dayEnd = new Date(date);
+          dayEnd.setHours(23, 59, 59, 999);
 
-        return (
-            <>
-                {/* 공휴일 이름을 렌더링합니다. */}
-                {isPublicHoliday && (
-                    <HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>
-                )}
-                {dayEvents.slice(0, maxEventsToShow).map(event => (
-                    <EventHighlighter
-                        key={event.eventId}
-                        color={getColorForTId(event.tId)}
-                        opacity={event.isAllDay ? 1 : 0.5}
-                        title={event.title}
-                    >
-                        {event.title}
-                    </EventHighlighter>
-                ))}
-            </>
-        );
-    };
+          if (event.isAllDay) {
+              const eventStartDay = new Date(event.startDate);
+              eventStartDay.setHours(0, 0, 0, 0);
+              const eventEndDay = new Date(event.endDate);
+              eventEndDay.setHours(0, 0, 0, 0);
+              return dayStart >= eventStartDay && dayStart <= eventEndDay;
+          } else {
+              return event.startDate <= dayEnd && event.endDate >= dayStart;
+          }
+      });
 
-  const selectedDayEvents = selectedDate ? events.filter(event => {
+      // 공휴일이 있으면 이벤트는 하나만 표시하여 공간을 확보합니다.
+      const maxEventsToShow = isPublicHoliday ? 1 : 2;
+
+      return (
+          <>
+              {/* 공휴일 이름을 렌더링합니다. */}
+              {isPublicHoliday && (
+                  <HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>
+              )}
+              {dayEvents.slice(0, maxEventsToShow).map(event => (
+                  <EventHighlighter
+                      key={event.eventId}
+                      color={getColorForTId(event.tId)}
+                      opacity={event.isAllDay ? 1 : 0.5}
+                      title={event.title}
+                  >
+                      {event.title}
+                  </EventHighlighter>
+              ))}
+          </>
+      );
+  };
+
+  const selectedDayEvents = selectedDate ? filteredEvents.filter(event => {
       // '하루 종일' 이벤트가 우측 패널에 정상적으로 표시되도록 필터링 로직을 수정합니다.
       const dayStart = new Date(selectedDate);
       dayStart.setHours(0, 0, 0, 0);
@@ -502,9 +555,44 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </>
       );
     }
+
+    if (isSearching) {
+        return (
+            <>
+                <SearchContainer>
+                    <SearchInput
+                        type="text"
+                        placeholder="보고싶은 팀 일정을 입력해주세요."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </SearchContainer>
+                <TeamListContainer>
+                    {allTeamNames
+                        .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map(name => (
+                            <TeamButton key={name} onClick={() => {
+                                setActiveFilterTName(name); // 팀 이름 클릭 시 필터 적용
+                                setIsSearching(false); // 검색창 닫기
+                                setSearchTerm(''); // 검색어 초기화
+                            }}>
+                                {name}
+                            </TeamButton>
+                        ))}
+                </TeamListContainer>
+            </>
+        );
+    }
+
     if (selectedDate) {
       return (
         <>
+          {activeFilterTName && (
+              <FilterInfoContainer>
+                  <span><strong>{activeFilterTName}</strong> 일정만 보는 중</span>
+                  <ClearFilterButton onClick={() => setActiveFilterTName(null)}>필터링 끄기</ClearFilterButton>
+              </FilterInfoContainer>
+          )}
           <DetailsHeader>{selectedDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</DetailsHeader>
           {selectedDayEvents.length > 0 ? (
             selectedDayEvents.map(event => (
@@ -526,11 +614,21 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           )}
         </>
       );
-    }return (
-      <EmptyPanel>
-        <p style={{ fontSize: '1.2rem', marginBottom: '10px' }}>🗓️</p>
-        <p>날짜를 선택하여<br/>일정을 확인하거나<br/>새 일정을 추가하세요.</p>
-      </EmptyPanel>
+    }
+    
+    return (
+      <>
+        {activeFilterTName && (
+            <FilterInfoContainer>
+              <span><strong>{activeFilterTName}</strong> 일정만 보는 중</span>
+              <ClearFilterButton onClick={() => setActiveFilterTName(null)}>필터링 끄기</ClearFilterButton>
+            </FilterInfoContainer>
+        )}
+        <EmptyPanel>
+          <p style={{ fontSize: '1.2rem', marginBottom: '10px' }}>🗓️</p>
+          <p>날짜를 선택하여<br/>일정을 확인하거나<br/>새 일정을 추가하세요.</p>
+        </EmptyPanel>
+      </>
     );
   };
 
@@ -569,6 +667,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </CalendarContainer>
 
         <RightPanelContainer>
+          {!activeFilterTName && (
+            <SearchIcon onClick={() => setIsSearching(prev => !prev)}>🔍</SearchIcon>
+          )}
           {renderRightPanelContent()}
         </RightPanelContainer>
       </ModalContent>
