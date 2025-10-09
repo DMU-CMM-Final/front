@@ -45,7 +45,10 @@ const ProjectList: React.FC = () => {
   const [editingTeam, setEditingTeam] = useState<EditingTeamInfo | null>(null);
   const modificationMenuRef = useRef<HTMLDivElement>(null);
   const [isCalendarOpen, setCalendarOpen] = useState(false);
-  const openCalendar = () => setCalendarOpen(true);
+  const openCalendar = () => {
+  setShowMessage(false); 
+  setCalendarOpen(true); 
+};
   const closeCalendar = () => setCalendarOpen(false);
 
   // 팀 목록 가져오기
@@ -280,13 +283,13 @@ const ProjectList: React.FC = () => {
       <CalendarModal isOpen={isCalendarOpen} onClose={closeCalendar} />
       <HeaderBar>
         <Logo onClick={() => navigate("/")}>BlankSync</Logo>
-        <RecentTitle>최근 프로젝트</RecentTitle>
+        <RecentTitle>팀 리스트</RecentTitle>
         <CreateButton onClick={() => navigate("/create")}>생성하기 +</CreateButton>
       </HeaderBar>
       <Body>
         <Sidebar>
           <SidebarTitle>
-            {userName ? `${userName}님의 프로젝트` : "○○○님의 프로젝트"}
+            {userName ? `${userName}님의 팀리스트` : "○○○님의 팀리스트"}
           </SidebarTitle>
           <SidebarList>
             {teams.length === 0 ? (

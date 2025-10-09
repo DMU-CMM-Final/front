@@ -258,13 +258,19 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
       console.log("Fetched raw calendar data from API:", data);
 
-      const processedEvents: CalendarEvent[] = data.map((event: any) => ({
+      const processedEvents: CalendarEvent[] = data.map((event: any) => {
+      const startDate = new Date(event.startDate + 'Z');
+      const endDate = new Date(event.endDate + 'Z');
+
+      return {
         ...event,
-        tId: event.tid, // 소문자 tid를 카멜케이스 tId에 할당
+        tId: event.tid,
         tname: event.tname,
-        startDate: new Date(event.startDate),
-        endDate: new Date(event.endDate)
-      }));
+        startDate,
+        endDate,
+      };
+    });
+
       setEvents(processedEvents);
 
     } catch (error) { console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); }
@@ -461,16 +467,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           dayStart.setHours(0, 0, 0, 0);
           const dayEnd = new Date(date);
           dayEnd.setHours(23, 59, 59, 999);
-
-          if (event.isAllDay) {
-              const eventStartDay = new Date(event.startDate);
-              eventStartDay.setHours(0, 0, 0, 0);
-              const eventEndDay = new Date(event.endDate);
-              eventEndDay.setHours(0, 0, 0, 0);
-              return dayStart >= eventStartDay && dayStart <= eventEndDay;
-          } else {
-              return event.startDate <= dayEnd && event.endDate >= dayStart;
-          }
+          
+          // 이벤트의 시작 시간이 하루의 끝보다 전이고, 이벤트의 종료 시간이 하루의 시작보다 뒤라면 해당 날짜에 걸쳐있는 것으로 간주
+          return event.startDate <= dayEnd && event.endDate >= dayStart;
       });
 
       // 공휴일이 있으면 이벤트는 하나만 표시하여 공간을 확보합니다.
@@ -503,18 +502,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       const dayEnd = new Date(selectedDate);
       dayEnd.setHours(23, 59, 59, 999);
 
-      if (event.isAllDay) {
-        // '하루 종일' 이벤트: 시간은 무시하고 날짜만으로 포함 여부를 확인합니다.
-        const eventStartDay = new Date(event.startDate);
-        eventStartDay.setHours(0, 0, 0, 0);
-        const eventEndDay = new Date(event.endDate);
-        eventEndDay.setHours(0, 0, 0, 0);
-        // 선택된 날짜(dayStart)가 이벤트 기간(eventStartDay ~ eventEndDay)에 포함되는지 확인
-        return dayStart >= eventStartDay && dayStart <= eventEndDay;
-      } else {
-        // 시간이 지정된 이벤트: 기존 로직대로 시간이 겹치는지 확인합니다.
-        return event.startDate <= dayEnd && event.endDate >= dayStart;
-      }
+      // 이벤트의 시작 시간이 하루의 끝보다 전이고, 이벤트의 종료 시간이 하루의 시작보다 뒤라면 해당 날짜에 걸쳐있는 것으로 간주
+      return event.startDate <= dayEnd && event.endDate >= dayStart;
   }) : [];
 
   const renderRightPanelContent = () => {
@@ -667,7 +656,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </CalendarContainer>
 
         <RightPanelContainer>
-          {!activeFilterTName && (
+          {!isSearching && !activeFilterTName && (
             <SearchIcon onClick={() => setIsSearching(prev => !prev)}>🔍</SearchIcon>
           )}
           {renderRightPanelContent()}
