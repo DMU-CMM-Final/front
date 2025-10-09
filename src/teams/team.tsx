@@ -39,7 +39,7 @@ interface CalendarEvent {
 }
 
 // 기타 타입 정의
-interface Project { pId: number; pName: string; createDate: string; }
+interface Project { pId: number; pName:string; createDate: string; }
 interface Participant { id: string; color: string; }
 interface TextBox {
   node: string;
@@ -48,6 +48,17 @@ interface TextBox {
   width: number; height: number; text: string; color: string; font: string;
   size: number; zIndex?: number; isOptimistic?: boolean;
 }
+
+// ✨ [추가] 시간대 변환 문제를 해결하기 위한 헬퍼 함수
+// 서버에서 받은 UTC 시간 문자열을 브라우저의 시간대 변환 없이 그대로 Date 객체로 만듭니다.
+const parseUTCStringAsLocal = (dateString: string): Date => {
+  if (!dateString) return new Date();
+  // '2025-10-22T15:55:00.000Z' 형식의 문자열에서 T와 Z를 기준으로 숫자만 추출
+  const parts = dateString.split(/[^0-9]/).map(s => parseInt(s, 10));
+  // new Date(year, month-1, day, hour, minute, second)
+  return new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+};
+
 
 const generateColor = (id: string) => {
   let hash = 0;
@@ -99,7 +110,8 @@ const Teams: React.FC = () => {
 
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
-  const [miniCalDate, setMiniCalDate] = useState(new Date());
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [showAllEvents, setShowAllEvents] = useState(false);
 
   const { socket } = useSocketManager(String(teamId), userId);
   const socketRef = useRef<Socket | null>(null);
@@ -114,42 +126,70 @@ const Teams: React.FC = () => {
   const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
 
   useEffect(() => {
-    if (!socket || !teamId) {
+    if (!socket || !teamId || !userEmail) {
       setCalendarEvents([]);
       return;
     }
 
     const fetchCalendarEvents = (date: Date) => {
       const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-      socket.emit('calendar-init', { tId: teamId, date: dateParam });
+      
+      if (showAllEvents) {
+        socket.emit('calendar-all', { uId: userEmail, date: dateParam });
+      } else {
+        socket.emit('calendar-init', { tId: teamId, date: dateParam });
+      }
     };
 
-    fetchCalendarEvents(miniCalDate);
+    fetchCalendarEvents(calendarDate);
 
-    const handleCalendarData = (data: any) => {
-      const eventList = (data && Array.isArray(data.events)) ? data.events : [];
+    const handleGenericCalendarData = (data: any) => {
+      console.log('Received calendar data:', data);
+
+      let eventList: any[] = [];
+      let responseTid: number | null = null;
+
+      if (data && !Array.isArray(data) && data.events) {
+        eventList = data.events;
+        responseTid = data.tId || null;
+      }
+      else if (Array.isArray(data) && data.length > 0 && data[0].events) {
+        const payload = data[0];
+        eventList = Array.isArray(payload.events) ? payload.events : [];
+        responseTid = payload.tId || null;
+      }
+      else if (Array.isArray(data)) {
+        eventList = data;
+      }
+
       const processedEvents: CalendarEvent[] = eventList.map((event: any) => ({
         ...event,
-        startDate: new Date(event.startDate),
-        endDate: new Date(event.endDate)
+        tId: event.tId !== undefined ? event.tId : responseTid,
+        // ✨ [수정] 새로운 헬퍼 함수를 사용하여 Date 객체를 생성합니다.
+        startDate: parseUTCStringAsLocal(event.startDate),
+        endDate: parseUTCStringAsLocal(event.endDate)
       }));
+      
+      console.log('[데이터 처리 후 최종 결과]', processedEvents);
       setCalendarEvents(processedEvents);
     };
 
-    const handleRealtimeUpdate = () => fetchCalendarEvents(miniCalDate);
+    const handleRealtimeUpdate = () => fetchCalendarEvents(calendarDate);
 
-    socket.on('calendar-data', handleCalendarData);
+    socket.on('calendar-data', handleGenericCalendarData);
+    socket.on('calendar-all-data', handleGenericCalendarData);
     socket.on('calendar-event-new', handleRealtimeUpdate);
     socket.on('calendar-event-updated', handleRealtimeUpdate);
     socket.on('calendar-event-deleted', handleRealtimeUpdate);
 
     return () => {
-      socket.off('calendar-data', handleCalendarData);
+      socket.off('calendar-data', handleGenericCalendarData);
+      socket.off('calendar-all-data', handleGenericCalendarData);
       socket.off('calendar-event-new', handleRealtimeUpdate);
       socket.off('calendar-event-updated', handleRealtimeUpdate);
       socket.off('calendar-event-deleted', handleRealtimeUpdate);
     };
-  }, [socket, teamId, miniCalDate]);
+  }, [socket, teamId, userEmail, calendarDate, showAllEvents]);
 
   const handleAttributeChange = (attribute: 'size' | 'color' | 'font', value: any) => {
     setTextBoxes(prev => {
@@ -342,54 +382,46 @@ const Teams: React.FC = () => {
     return Math.max(textMax, voteMax, imageMax);
   };
   
-  // ✅ [수정] 메인 로직 전체 수정
   const handleMainAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    // 다른 객체가 아닌 MainArea 자신을 클릭했을 때만 포커스를 해제합니다.
     if (e.target === mainAreaRef.current) {
       setFocusedIdx(null);
       setFocusedImageIdx(null);
       setFocusedVoteIdx(null);
     }
       
-    // 기본적인 실행 조건 확인
     if (!mainAreaRef.current || !socket || !selectedProjectId) return;
+    if (!isTextMode && !isVoteCreateMode) return;
+    if (e.target !== mainAreaRef.current) return;
 
     const rect = mainAreaRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // if-else if 구조로 하나의 동작만 실행되도록 보장
     if (isTextMode) {
-      // 빈 공간(배경)을 클릭했을 때만 생성
-      if (e.target === mainAreaRef.current) {
-        setIsTextMode(false); // 생성 후 텍스트 모드 비활성화
-        const tempNodeId = `optimistic-${Date.now()}`;
-        const optimisticBox: TextBox = {
-            node: tempNodeId,
-            tId: String(teamId),
-            pId: selectedProjectId, uId: userId,
-            x, y, width: 200, height: 40, text: "", color: "#000000", font: "Arial", size: 16,
-            isOptimistic: true
-        };
-        setTextBoxes(prev => [...prev, optimisticBox]);
-        setFocusedIdx(textBoxes.length);
-        socket.emit("textEvent", { 
-            fnc: "new", type: "text", pId: selectedProjectId, 
-            cLocate: { x, y }, cScale: { width: 200, height: 40 }, 
-            cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
-            tempNodeId: tempNodeId
-        });
-      }
+      setIsTextMode(false);
+      const tempNodeId = `optimistic-${Date.now()}`;
+      const optimisticBox: TextBox = {
+          node: tempNodeId,
+          tId: String(teamId),
+          pId: selectedProjectId, uId: userId,
+          x, y, width: 200, height: 40, text: "", color: "#000000", font: "Arial", size: 16,
+          isOptimistic: true
+      };
+      setTextBoxes(prev => [...prev, optimisticBox]);
+      setFocusedIdx(textBoxes.length);
+      socket.emit("textEvent", { 
+          fnc: "new", type: "text", pId: selectedProjectId, 
+          cLocate: { x, y }, cScale: { width: 200, height: 40 }, 
+          cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
+          tempNodeId: tempNodeId
+      });
     } else if (isVoteCreateMode) {
-      // 빈 공간(배경)을 클릭했을 때만 생성
-      if (e.target === mainAreaRef.current) {
-        setIsVoteCreateMode(false); // 생성 후 투표 모드 비활성화
-        socket.emit("voteEvent", { 
-          fnc: "new", type: "vote", pId: selectedProjectId, 
-          cLocate: { x, y }, cScale: { width: 300, height: 200 }, 
-          cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] 
-        });
-      }
+      setIsVoteCreateMode(false);
+      socket.emit("voteEvent", { 
+        fnc: "new", type: "vote", pId: selectedProjectId, 
+        cLocate: { x, y }, cScale: { width: 300, height: 200 }, 
+        cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] 
+      });
     }
   };
   
@@ -478,7 +510,7 @@ const Teams: React.FC = () => {
         <Calendar 
           onClick={() => setIsCalendarModalOpen(true)}
           events={calendarEvents}
-          onMonthChange={setMiniCalDate}
+          onMonthChange={setCalendarDate}
         />
 
         <CreateProjectButton onClick={handleCreateProject}>+ 새 프로젝트 생성</CreateProjectButton>
@@ -502,7 +534,6 @@ const Teams: React.FC = () => {
               <FloatingToolbar ref={toolbarRef}>
                 {focusedIdx === null ? (
                   <>
-                    {/* ✅ [수정] 텍스트 버튼 클릭 시 다른 모드 비활성화 */}
                     <ToolIcon onClick={() => { setIsTextMode(prev => !prev); setIsVoteCreateMode(false); }} title="텍스트 상자 생성">T</ToolIcon>
                     <ToolIcon onClick={() => fileInputRef.current?.click()} title="이미지 추가"><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
                     <ToolIcon title="그리기"><PenIcon /></ToolIcon>
@@ -564,7 +595,6 @@ const Teams: React.FC = () => {
             <FloatingButtonWrap>
               {showCreateMenu && (
               <CreateMenu>
-                  {/* ✅ [수정] 투표 버튼 클릭 시 다른 모드 비활성화 */}
                   <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setIsTextMode(false); setShowCreateMenu(false); }}>투표</CreateMenuButton>
                   <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
                   <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
@@ -591,8 +621,11 @@ const Teams: React.FC = () => {
         onClose={() => setIsCalendarModalOpen(false)} 
         socket={socket}
         teamId={teamId}
-        initialEvents={calendarEvents}
-        initialDate={miniCalDate}
+        events={calendarEvents}
+        activeDate={calendarDate}
+        onMonthChange={setCalendarDate}
+        showAllEvents={showAllEvents}
+        onToggleShowAll={setShowAllEvents}
       />
     </Container>
   );

@@ -21,8 +21,11 @@ interface Props {
   onClose: () => void;
   socket: Socket | null;
   teamId: number | null;
-  initialEvents: CalendarEvent[];
-  initialDate: Date;
+  events: CalendarEvent[];
+  activeDate: Date;
+  onMonthChange: (date: Date) => void;
+  showAllEvents: boolean;
+  onToggleShowAll: (show: boolean) => void;
 }
 
 // --- 스타일 정의 ---
@@ -36,6 +39,7 @@ const ModalContent = styled.div`
 `;
 const CalendarContainer = styled.div`
   display: flex; flex-direction: column; align-items: center;
+  position: relative;
 `;
 const RightPanelContainer = styled.div`
   width: 320px;
@@ -134,12 +138,16 @@ const EmptyPanel = styled.div`
 const AddEventButton = styled(ActionButton)`
   margin-top: 16px;
 `;
-const TeamSelect = styled.select`
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 1rem;
-  background-color: white;
+const ToggleContainer = styled.div`
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  z-index: 10;
 `;
 
 // --- 헬퍼 함수 ---
@@ -154,31 +162,20 @@ const formatDateTimeForServer = (date: Date) => {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
-const hslToHex = (h: number, s: number, l: number): string => {
-  s /= 100;
-  l /= 100;
-  const k = (n: number) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) =>
-    l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
-  const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
-  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
-};
-
-const generateDeterministicColor = (id: number): string => {
-  const hue = (id * 37) % 360;
-  const saturation = 70;
-  const lightness = 65;
-  return hslToHex(hue, saturation, lightness);
-};
-
 const hd = new Holidays('KR');
 
-const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initialEvents, initialDate }) => {
+const CalendarModal: React.FC<Props> = ({ 
+  isOpen, 
+  onClose, 
+  socket, 
+  teamId, 
+  events, 
+  activeDate, 
+  onMonthChange,
+  showAllEvents,
+  onToggleShowAll
+}) => {
   const { userEmail } = useAuth();
-  
-  const [events, setEvents] = useState<CalendarEvent[]>(initialEvents);
-  const [activeDate, setActiveDate] = useState(new Date(initialDate));
   
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -187,66 +184,27 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
   
   const [newEvent, setNewEvent] = useState({
     title: '', description: '', startDate: new Date(),
-    endDate: new Date(Date.now() + 60 * 60 * 1000), isAllDay: false, tId: null as number | null
+    endDate: new Date(Date.now() + 60 * 60 * 1000), isAllDay: false, tId: teamId
   });
 
   useEffect(() => {
-    if (isOpen) { document.body.style.overflow = 'hidden'; }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
-
-  const getColorForTId = useCallback((tId: number | null): string => {
-    if (!tId) return '#B8B6F2';
-    return generateDeterministicColor(tId);
-  }, []);
-
-  const fetchEvents = useCallback((date: Date) => {
-    if (!socket || !userEmail) return;
-    setLoading(true);
-    const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-    socket.emit('calendar-init', { uId: userEmail, date: dateParam });
-  }, [socket, userEmail]);
-  
-  useEffect(() => {
-    if (!socket || !isOpen) return;
-
-    const handleCalendarData = (data: any) => {
-      const eventList = (data && Array.isArray(data.events)) ? data.events : [];
-      const processedEvents: CalendarEvent[] = eventList.map((event: any) => ({
-        ...event,
-        startDate: new Date(event.startDate),
-        endDate: new Date(event.endDate)
-      }));
-      setEvents(processedEvents);
-      setLoading(false);
-    };
-    
-    const handleRealtimeUpdate = () => fetchEvents(activeDate);
-
-    socket.on('calendar-data', handleCalendarData);
-    socket.on('calendar-event-new', handleRealtimeUpdate);
-    socket.on('calendar-event-updated', handleRealtimeUpdate);
-    socket.on('calendar-event-deleted', handleRealtimeUpdate);
-
-    return () => {
-      socket.off('calendar-data', handleCalendarData);
-      socket.off('calendar-event-new', handleRealtimeUpdate);
-      socket.off('calendar-event-updated', handleRealtimeUpdate);
-      socket.off('calendar-event-deleted', handleRealtimeUpdate);
-    };
-  }, [socket, isOpen, activeDate, fetchEvents]);
-  
-  useEffect(() => {
-    if (isOpen) {
-      setEvents(initialEvents);
-      setActiveDate(new Date(initialDate));
+    if (isOpen) { 
+      document.body.style.overflow = 'hidden'; 
     } else {
       setSelectedDate(null);
       setIsAddingEvent(false);
       setEditingEvent(null);
     }
-  }, [isOpen, initialEvents, initialDate]);
+    return () => { document.body.style.overflow = 'unset'; };
+  }, [isOpen]);
 
+  const getColorForTId = useCallback((tId: number | null): string => {
+    if (tId !== null && tId !== undefined) {
+      return '#8B4513';
+    }
+    return '#B8B6F2';
+  }, []);
+  
   const handleShowAddForm = () => {
     setIsAddingEvent(true);
     const baseDate = selectedDate ? new Date(selectedDate) : new Date();
@@ -256,23 +214,21 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
     setNewEvent({
         title: '', description: '', startDate: baseDate,
         endDate: new Date(baseDate.getTime() + 60 * 60 * 1000),
-        isAllDay: false, tId: null
+        isAllDay: false, tId: teamId
     });
   };
 
-  const handleNewEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleNewEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
 
     setNewEvent(prev => ({
       ...prev,
-      [name]: isCheckbox 
-        ? (e.target as HTMLInputElement).checked 
-        : (name === 'tId' ? (value ? parseInt(value) : null)
-        : (name === 'startDate' || name === 'endDate' ? new Date(value) : value))
+      [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value)
     }));
   };
   
+  // ✅ [수정 완료] '하루 종일' 일정 저장 로직 변경
   const handleSaveEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !userEmail || !newEvent.title) {
@@ -280,47 +236,69 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
         return;
     }
 
-    const startOfDay = new Date(newEvent.startDate); startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(newEvent.endDate); endOfDay.setHours(23, 59, 59, 999);
+    let finalStartDate: string;
+    let finalEndDate: string;
+
+    if (newEvent.isAllDay) {
+        const startOfDay = new Date(newEvent.startDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        finalStartDate = formatDateTimeForServer(startOfDay);
+
+        // ✨ 핵심: 종료 날짜를 시작 날짜와 동일하게 설정합니다.
+        const endOfDay = new Date(newEvent.startDate);
+        endOfDay.setHours(0, 0, 0, 0); // 시간은 시작과 동일하게 맞추거나 무시해도 됩니다.
+        finalEndDate = formatDateTimeForServer(endOfDay);
+    } else {
+        finalStartDate = formatDateTimeForServer(newEvent.startDate);
+        finalEndDate = formatDateTimeForServer(newEvent.endDate);
+    }
 
     const payload = {
         uId: userEmail,
-        tId: newEvent.tId,
+        tId: teamId,
         title: newEvent.title,
         description: newEvent.description,
         isAllDay: newEvent.isAllDay,
-        startDate: formatDateTimeForServer(newEvent.isAllDay ? startOfDay : newEvent.startDate),
-        endDate: formatDateTimeForServer(newEvent.isAllDay ? endOfDay : newEvent.endDate),
+        startDate: finalStartDate,
+        endDate: finalEndDate,
     };
-    
-    if (payload.tId === null) {
-      delete (payload as any).tId;
-    }
     
     socket.emit('calendar-new', payload);
     setIsAddingEvent(false);
   };
   
-  const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!editingEvent) return;
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
 
     setEditingEvent({
-      ...editingEvent,
-      [name]: isCheckbox 
-        ? (e.target as HTMLInputElement).checked 
-        : (name === 'tId' ? (value ? parseInt(value) : null)
-        : (name === 'startDate' || name === 'endDate' ? new Date(value) : value))
+        ...editingEvent,
+        [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value)
     });
   };
 
+  // ✅ [수정 완료] '하루 종일' 일정 업데이트 로직 변경
   const handleUpdateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !userEmail || !editingEvent) return;
     
-    const startOfDay = new Date(editingEvent.startDate); startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(editingEvent.endDate); endOfDay.setHours(23, 59, 59, 999);
+    let finalStartDate: string;
+    let finalEndDate: string;
+
+    if (editingEvent.isAllDay) {
+        const startOfDay = new Date(editingEvent.startDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        finalStartDate = formatDateTimeForServer(startOfDay);
+        
+        // ✨ 핵심: 종료 날짜를 시작 날짜와 동일하게 설정합니다.
+        const endOfDay = new Date(editingEvent.startDate);
+        endOfDay.setHours(0, 0, 0, 0);
+        finalEndDate = formatDateTimeForServer(endOfDay);
+    } else {
+        finalStartDate = formatDateTimeForServer(editingEvent.startDate);
+        finalEndDate = formatDateTimeForServer(editingEvent.endDate);
+    }
     
     const payload = {
         eventId: editingEvent.eventId,
@@ -329,13 +307,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
         title: editingEvent.title,
         description: editingEvent.description,
         isAllDay: editingEvent.isAllDay,
-        startDate: formatDateTimeForServer(editingEvent.isAllDay ? startOfDay : editingEvent.startDate),
-        endDate: formatDateTimeForServer(editingEvent.isAllDay ? endOfDay : editingEvent.endDate),
+        startDate: finalStartDate,
+        endDate: finalEndDate,
     };
-
-    if (payload.tId === null) {
-      delete (payload as any).tId;
-    }
 
     socket.emit('calendar-update', payload);
     setEditingEvent(null);
@@ -349,8 +323,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
 
   const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => { 
     if (activeStartDate) {
-      setActiveDate(activeStartDate);
-      fetchEvents(activeStartDate); // 모달 안에서 월 변경 시 데이터 다시 조회
+      onMonthChange(activeStartDate);
     }
   };
   const handleDateClick = (date: Date) => {
@@ -371,15 +344,12 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
         const dayEnd = new Date(date);
         dayEnd.setHours(23, 59, 59, 999);
 
-        if (event.isAllDay) {
-            const eventStartDay = new Date(event.startDate);
-            eventStartDay.setHours(0, 0, 0, 0);
-            const eventEndDay = new Date(event.endDate);
-            eventEndDay.setHours(0, 0, 0, 0);
-            return dayStart >= eventStartDay && dayStart <= eventEndDay;
-        } else {
-            return event.startDate <= dayEnd && event.endDate >= dayStart;
-        }
+        const eventStartDay = new Date(event.startDate);
+        eventStartDay.setHours(0, 0, 0, 0);
+        const eventEndDay = new Date(event.endDate);
+        eventEndDay.setHours(23, 59, 59, 999); // 종료일도 하루 전체를 포함하도록 설정
+
+        return dayStart <= eventEndDay && dayEnd >= eventStartDay;
     });
 
     const maxEventsToShow = isPublicHoliday ? 1 : 2;
@@ -409,15 +379,12 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
       const dayEnd = new Date(selectedDate);
       dayEnd.setHours(23, 59, 59, 999);
 
-      if (event.isAllDay) {
-        const eventStartDay = new Date(event.startDate);
-        eventStartDay.setHours(0, 0, 0, 0);
-        const eventEndDay = new Date(event.endDate);
-        eventEndDay.setHours(0, 0, 0, 0);
-        return dayStart >= eventStartDay && dayStart <= eventEndDay;
-      } else {
-        return event.startDate <= dayEnd && event.endDate >= dayStart;
-      }
+      const eventStartDay = new Date(event.startDate);
+      eventStartDay.setHours(0, 0, 0, 0);
+      const eventEndDay = new Date(event.endDate);
+      eventEndDay.setHours(23, 59, 59, 999);
+
+      return dayStart <= eventEndDay && dayEnd >= eventStartDay;
   }) : [];
 
   const renderRightPanelContent = () => {
@@ -435,15 +402,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
         <>
           <DetailsHeader>{isEditMode ? '일정 수정' : '새 일정 추가'}</DetailsHeader>
           <Form onSubmit={handleSubmit}>
-            {teamId && (
-              <FormGroup>
-                <label htmlFor="tId">캘린더 종류</label>
-                <TeamSelect name="tId" id="tId" value={currentEventData.tId ?? ''} onChange={handleChange}>
-                  <option value="">개인 일정</option>
-                  <option value={teamId}>팀 일정</option>
-                </TeamSelect>
-              </FormGroup>
-            )}
             <FormGroup><label htmlFor="title">제목</label><input type="text" name="title" id="title" value={currentEventData.title} onChange={handleChange} required /></FormGroup>
             <FormGroup><FormRow><label>하루 종일</label><SwitchLabel><SwitchInput type="checkbox" name="isAllDay" checked={currentEventData.isAllDay} onChange={handleChange} /><SwitchSlider /></SwitchLabel></FormRow></FormGroup>
             <FormGroup>
@@ -452,12 +410,14 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
                   value={currentEventData.isAllDay ? toDateInputString(currentEventData.startDate) : toDateTimeLocalString(currentEventData.startDate)}
                   onChange={handleChange} />
             </FormGroup>
-            <FormGroup>
-              <label htmlFor="endDate">종료</label>
-              <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="endDate" id="endDate"
-                  value={currentEventData.isAllDay ? toDateInputString(currentEventData.endDate) : toDateTimeLocalString(currentEventData.endDate)}
-                  onChange={handleChange} />
-            </FormGroup>
+            {!currentEventData.isAllDay && (
+              <FormGroup>
+                <label htmlFor="endDate">종료</label>
+                <input type={'datetime-local'} name="endDate" id="endDate"
+                    value={toDateTimeLocalString(currentEventData.endDate)}
+                    onChange={handleChange} />
+              </FormGroup>
+            )}
             <FormGroup><label htmlFor="description">상세 설명</label><textarea name="description" id="description" rows={4} value={currentEventData.description} onChange={handleChange}></textarea></FormGroup>
             <ButtonContainer style={{ marginTop: 'auto' }}>
                 <ActionButton type="submit">저장</ActionButton>
@@ -506,6 +466,17 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose, socket, teamId, initi
     <ModalOverlay onClick={onClose}>
       <ModalContent onClick={(e) => e.stopPropagation()}>
         <CalendarContainer>
+          <ToggleContainer>
+            <span>전체 일정 보기</span>
+            <SwitchLabel>
+              <SwitchInput 
+                type="checkbox" 
+                checked={showAllEvents} 
+                onChange={(e) => onToggleShowAll(e.target.checked)} 
+              />
+              <SwitchSlider />
+            </SwitchLabel>
+          </ToggleContainer>
           <CalendarWrapper>
             {loading && <div style={{ position: 'absolute', zIndex: 1, top: '50%', left: '50%', transform: 'translate(-50%, -50%)'}}>로딩 중...</div>}
             <Calendar
