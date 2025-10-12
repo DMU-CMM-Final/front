@@ -61,7 +61,6 @@ const Login: React.FC = () => {
         }
 
       } else {
-        // 로그인 실패 시 (e.g., status code 401, 404)
         alert("아이디 또는 비밀번호가 올바르지 않습니다.");
       }
     } catch (error) {

@@ -30,7 +30,7 @@ const Header: React.FC = () => {
         <Nav>
           <NavItem onClick={() => navigate("/advice")}>홈페이지 설명</NavItem>
           <NavItem onClick={() => navigate("/create")}>팀 구성하기</NavItem>
-          <NavItem onClick={() => navigate("/projectList")}>나의 프로젝트</NavItem>
+          <NavItem onClick={() => navigate("/projectList")}>나의 팀리스트</NavItem>
         </Nav>
       )}
 

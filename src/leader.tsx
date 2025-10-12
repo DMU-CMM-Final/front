@@ -36,6 +36,16 @@ type TeamMember = {
   count: number;
 };
 
+interface InvitedMemberInModal {
+  email: string;
+  mid: number;
+}
+
+type Project = {
+  pid: number;
+  pname: string;
+};
+
 // --- API URL ---
 const API_URL = process.env.REACT_APP_API_URL;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -236,15 +246,19 @@ const Leader: React.FC = () => {
   const [teamName, setTeamName] = useState<string>("");
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [totalMeetings, setTotalMeetings] = useState<number>(10);
-  const [projects, setProjects] = useState(["2025년 3분기 신제품 기획", "하반기 마케팅 전략", "사용자 피드백 분석"]); // 프로젝트는 아직 Mock 데이터 유지
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   // --- 모달 관련 상태 추가 ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [memberEmail, setMemberEmail] = useState(""); // 모달 내 이메일 입력
-  const [newlyInvitedEmails, setNewlyInvitedEmails] = useState<string[]>([]); // 모달 내에서 추가된 이메일 목록
+  const [newlyInvitedMembers, setNewlyInvitedMembers] = useState<InvitedMemberInModal[]>([]); // 모달 내에서 추가된 이메일 목록
   const [isAddingMember, setIsAddingMember] = useState(false); // 팀원 추가 API 호출 로딩 상태
+
+  const [isProjectModalOpen, setProjectModalOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [isAddingProject, setIsAddingProject] = useState(false);
 
   // --- 데이터 연동 함수 (useCallback으로 감싸 재사용) ---
   const fetchLeaderData = useCallback(async () => {
@@ -265,12 +279,11 @@ const Leader: React.FC = () => {
 
             // 👇 여기에 로그를 추가하여 API 응답 전체와 members 배열을 확인합니다.
             console.log('API에서 받은 전체 데이터:', data);
-            setTeamName(data.tname);
+            setTeamName(data.tname || "팀 이름 없음");
             setTotalMeetings(data.count || 10); // count가 없으면 기본값 10
             setTeamMembers(data.members || []); // members가 없으면 빈 배열
+            setProjects(data.project || []);
 
-            setTeamName(data.tname);
-            setTeamMembers(data.members);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -315,7 +328,7 @@ const Leader: React.FC = () => {
   const closeModal = () => {
     setIsModalOpen(false);
     setMemberEmail("");
-    setNewlyInvitedEmails([]);
+    setNewlyInvitedMembers([]);
   };
 
   // --- 모달 내에서 팀원 추가하는 함수 ---
@@ -329,7 +342,7 @@ const Leader: React.FC = () => {
       alert("이메일 형식을 지켜주세요!");
       return;
     }
-    if (newlyInvitedEmails.includes(memberEmail) || teamMembers.some(m => m.uid === memberEmail)) {
+    if (newlyInvitedMembers.some(m => m.email === memberEmail) || teamMembers.some(m => m.uid === memberEmail)) {
         alert("이미 추가되었거나 초대 요청된 이메일입니다.");
         return;
     }
@@ -345,10 +358,12 @@ const Leader: React.FC = () => {
           senduid: currentUserEmail,
         }),
       });
-      const result = await response.json();
-      if (result === true) {
+      const text = await response.text();
+      const mid = parseInt(text, 10);
+
+      if (!isNaN(mid) && mid !== 0) {
         alert("팀원 요청 성공!");
-        setNewlyInvitedEmails([...newlyInvitedEmails, memberEmail]);
+        setNewlyInvitedMembers([...newlyInvitedMembers, { email: memberEmail, mid: mid }]);
         setMemberEmail("");
         await fetchLeaderData(); // 실시간 업데이트를 위해 팀 정보 다시 로드
       } else {
@@ -362,15 +377,14 @@ const Leader: React.FC = () => {
   };
 
   // --- 모달 내에서 초대 목록을 삭제하는 함수 ---
-  const handleDeleteInvitation = async (emailToDelete: string) => {
+  const handleDeleteInvitation = async (midToDelete: number) => {
     setIsAddingMember(true); // 버튼 비활성화를 위해 로딩 상태 사용
     try {
       const response = await fetch(`/spring/api/teams/message/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tid: teamId,
-          uid: emailToDelete,
+          mid: midToDelete,
         }),
       });
 
@@ -378,7 +392,7 @@ const Leader: React.FC = () => {
         throw new Error("초대 취소에 실패했습니다.");
       }
       alert("팀원 초대가 취소되었습니다.");
-      setNewlyInvitedEmails(prev => prev.filter(email => email !== emailToDelete));
+      setNewlyInvitedMembers(prev => prev.filter(member => member.mid !== midToDelete));
       await fetchLeaderData(); // 메인 팀원 리스트도 갱신
 
     } catch (error: any) {
@@ -410,6 +424,72 @@ const Leader: React.FC = () => {
     }
   };
 
+  const openProjectModal = () => setProjectModalOpen(true);
+  const closeProjectModal = () => {
+    setProjectModalOpen(false);
+    setNewProjectName("");
+  };
+
+  const handleAddProject = async () => {
+    if (!newProjectName.trim()) {
+      alert("프로젝트 이름을 입력해주세요.");
+      return;
+    }
+    setIsAddingProject(true);
+    try {
+      const response = await fetch(`${API_URL}/spring/api/teams/projnew`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tid: teamId,
+          pname: newProjectName,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("프로젝트 추가에 실패했습니다.");
+      }
+
+      alert("프로젝트가 성공적으로 추가되었습니다.");
+      await fetchLeaderData(); // 데이터를 새로고침하여 추가된 프로젝트를 반영
+      closeProjectModal();     // 모달 닫기
+
+    } catch (error: any) {
+      console.error("프로젝트 추가 오류:", error);
+      alert(error.message);
+    } finally {
+      setIsAddingProject(false);
+    }
+  };
+
+  const handleDeleteProject = async (pidToDelete: number) => {
+    const projectName = projects.find(p => p.pid === pidToDelete)?.pname || "해당 프로젝트";
+    
+    if (window.confirm(`정말로 '${projectName}' 프로젝트를 삭제하시겠습니까?`)) {
+      try {
+        const response = await fetch(`${API_URL}/spring/api/teams/projdel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tid: teamId,
+            pid: pidToDelete,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("프로젝트 삭제에 실패했습니다.");
+        }
+
+        alert("프로젝트가 성공적으로 삭제되었습니다.");
+        await fetchLeaderData(); // 데이터를 다시 불러와 목록을 갱신합니다.
+
+      } catch (err: any) {
+        console.error("프로젝트 삭제 오류:", err);
+        alert(err.message);
+      }
+    }
+  };
+
   return (
     <Container>
       <Header />
@@ -422,6 +502,18 @@ const Leader: React.FC = () => {
         </PageHeader>
 
         <TopSection>
+          <Card>
+            <CardTitle>프로젝트 리스트</CardTitle>
+            <List>
+              {projects.map((project) => (
+                <ListItem key={project.pid}>
+                  <ItemText>{project.pname}</ItemText>
+                  <SmallButton onClick={() => handleDeleteProject(project.pid)}>삭제</SmallButton>
+                </ListItem>
+              ))}
+            </List>
+            <AddButton onClick={openProjectModal}>프로젝트 추가하기</AddButton>
+          </Card>
           <Card>
             <CardTitle>팀원 리스트</CardTitle>
             {teamMembers.length > 0 ? (
@@ -445,18 +537,6 @@ const Leader: React.FC = () => {
               <EmptyListMessage>현재 팀에 팀원이 없습니다.</EmptyListMessage>
             )}
             <AddButton onClick={openModal}>팀원 추가하기</AddButton>
-          </Card>
-          <Card>
-            <CardTitle>프로젝트 리스트</CardTitle>
-            <List>
-              {projects.map((project, index) => (
-                <ListItem key={index}>
-                  <ItemText>{project}</ItemText>
-                  <SmallButton>삭제</SmallButton>
-                </ListItem>
-              ))}
-            </List>
-            <AddButton>프로젝트 추가하기</AddButton>
           </Card>
         </TopSection>
 
@@ -517,10 +597,10 @@ const Leader: React.FC = () => {
               </ModalAddButton>
             </InputRow>
             <List>
-              {newlyInvitedEmails.map((email, idx) => (
-                <ListItem key={idx}>
-                  <span>{email}</span>
-                  <ModalDeleteButton onClick={() => handleDeleteInvitation(email)} disabled={isAddingMember}>
+              {newlyInvitedMembers.map((member) => (
+                <ListItem key={member.mid}>
+                  <span>{member.email}</span>
+                  <ModalDeleteButton onClick={() => handleDeleteInvitation(member.mid)} disabled={isAddingMember}>
                     ×
                   </ModalDeleteButton>
                 </ListItem>
@@ -528,6 +608,30 @@ const Leader: React.FC = () => {
             </List>
             <ModalButtonRow>
                 <ModalMainButton onClick={closeModal}>완료</ModalMainButton>
+            </ModalButtonRow>
+          </ModalContent>
+        </ModalOverlay>
+      )}
+
+      {/* --- 프로젝트 추가 모달 UI --- */}
+      {isProjectModalOpen && (
+        <ModalOverlay onClick={closeProjectModal}>
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalTitle>새 프로젝트 추가</ModalTitle>
+            <InputRow>
+              <ModalInput
+                type="text"
+                placeholder="새 프로젝트 이름 입력"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                disabled={isAddingProject}
+              />
+            </InputRow>
+            <ModalButtonRow>
+                <ModalMainButton onClick={handleAddProject} disabled={!newProjectName.trim() || isAddingProject}>
+                  {isAddingProject ? "추가 중..." : "추가하기"}
+                </ModalMainButton>
+                <ModalCancelButton onClick={closeProjectModal}>취소</ModalCancelButton>
             </ModalButtonRow>
           </ModalContent>
         </ModalOverlay>
@@ -863,6 +967,15 @@ const ModalMainButton = styled.button`
   transition: background 0.2s;
   &:hover {
     background: ${COLOR.accentDark};
+  }
+`;
+
+const ModalCancelButton = styled(ModalMainButton)`
+  background: ${COLOR.imgBg};
+  color: ${COLOR.accentDark};
+  &:hover {
+    background: ${COLOR.border};
+    color: ${COLOR.text};
   }
 `;
 

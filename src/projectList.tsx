@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import styled from "styled-components";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
+import CalendarModal from "./components/CalendarModal";
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -17,6 +18,7 @@ type TeamData = {
 };
 
 type MessageData = {
+  mid: number;
   tid: number;
   uid: string;
   uname: string;       // 받는 사람 이름 (추가)
@@ -42,6 +44,12 @@ const ProjectList: React.FC = () => {
   const mailIconRef = useRef<HTMLSpanElement>(null);
   const [editingTeam, setEditingTeam] = useState<EditingTeamInfo | null>(null);
   const modificationMenuRef = useRef<HTMLDivElement>(null);
+  const [isCalendarOpen, setCalendarOpen] = useState(false);
+  const openCalendar = () => {
+  setShowMessage(false); 
+  setCalendarOpen(true); 
+};
+  const closeCalendar = () => setCalendarOpen(false);
 
   // 팀 목록 가져오기
   const fetchTeams = useCallback(async () => {
@@ -133,6 +141,7 @@ const ProjectList: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mid: message.mid,
           tid: message.tid,        // 팀 ID
           uid: message.senduid,    // 초대를 보낸 사람의 ID
           senduid: userEmail,      // 응답하는 사람(현재 로그인한 유저)의 ID
@@ -169,8 +178,7 @@ const ProjectList: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uid: userEmail,      // 현재 로그인한 사용자의 ID
-          tid: message.tid,    // 삭제할 메시지의 팀 ID
+          mid: message.mid,
         }),
       });
 
@@ -272,15 +280,16 @@ const ProjectList: React.FC = () => {
 
   return (
     <Container>
+      <CalendarModal isOpen={isCalendarOpen} onClose={closeCalendar} />
       <HeaderBar>
         <Logo onClick={() => navigate("/")}>BlankSync</Logo>
-        <RecentTitle>최근 프로젝트</RecentTitle>
+        <RecentTitle>팀 리스트</RecentTitle>
         <CreateButton onClick={() => navigate("/create")}>생성하기 +</CreateButton>
       </HeaderBar>
       <Body>
         <Sidebar>
           <SidebarTitle>
-            {userName ? `${userName}님의 프로젝트` : "○○○님의 프로젝트"}
+            {userName ? `${userName}님의 팀리스트` : "○○○님의 팀리스트"}
           </SidebarTitle>
           <SidebarList>
             {teams.length === 0 ? (
@@ -320,8 +329,8 @@ const ProjectList: React.FC = () => {
                 {messages.length === 0 ? (
                   <NoMessage>받은 메시지가 없습니다.</NoMessage>
                 ) : (
-                  messages.map((message, idx) => (
-                    <MessageItem key={idx}>
+                  messages.map((message) => (
+                    <MessageItem key={message.mid}>
                       <div>
                         {/* content 값에 따라 다른 메시지 표시 */}
                         {message.content === 1 ? (
@@ -330,17 +339,27 @@ const ProjectList: React.FC = () => {
                             <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 회원님을 팀원으로 요청하였습니다.
                           </>
                         ) : message.content === 3 ? (
-                          // 팀 탈퇴 알림 (content: 3) - 새로 추가된 부분
+                          // 일정 생성 알림 (content: 3)
+                          <>
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 생성하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 4 ? (
+                          // 일정 수정 알림 (content: 4)
+                          <>
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 수정하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 5 ? (
+                          // 일정 삭제 알림 (content: 5)
+                          <>
+                            <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에 팀일정을 삭제하였습니다.
+                            <DismissButton onClick={() => handleDismiss(message)}>×</DismissButton>
+                          </>
+                        ) : message.content === 6 ? (
+                          // 팀 탈퇴 알림 (content: 6)
                           <>
                             <b>{message.senduname}({message.senduid})</b>님이 <b>{message.tname}</b>에서 나갔습니다.
-                            <DismissButton onClick={() => handleDismiss(message)}>
-                              ×
-                            </DismissButton>
-                          </>
-                        ) : message.content === 3 ? (
-                          // 팀 탈퇴 알림 (content: 3) - 새로 추가된 부분
-                          <>
-                            <b>{message.senduid}</b>님이 <b>{message.tname}</b>에서 나갔습니다.
                             <DismissButton onClick={() => handleDismiss(message)}>
                               ×
                             </DismissButton>
@@ -369,6 +388,13 @@ const ProjectList: React.FC = () => {
                           </ModalButton>
                         </ModalButtonRow>
                       )}
+                      {[3, 4, 5].includes(message.content) && (
+                        <ModalButtonRow>
+                          <ModalButton onClick={openCalendar}>
+                            캘린더 보러가기
+                          </ModalButton>
+                        </ModalButtonRow>
+                      )}
                     </MessageItem>
                   ))
                 )}
@@ -390,13 +416,16 @@ const ProjectList: React.FC = () => {
                     })
                   }
                 >
-                  <ProjectCardImage src="image/listImage.jpg" alt={team.tname} />
-                  <ProjectCardLabel>{team.tname}</ProjectCardLabel>
+                  <ProjectCardImage src="image/listImage.png" alt={team.tname} />
                   
-                  {/* --- 수정된 부분: 조건 없이 항상 버튼을 표시 --- */}
-                  <ModifyButton onClick={(e) => handleModifyClick(e, team)}>
-                    수정
-                  </ModifyButton>
+                  <CardFooter>
+                    <ProjectCardLabel>{team.tname}</ProjectCardLabel>
+                    <ModifyButton onClick={(e) => handleModifyClick(e, team)}>
+                      <svg width="24" height="24" viewBox="0 0 24 24">
+                        <path fill="currentColor" d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z" />
+                      </svg>
+                    </ModifyButton>
+                  </CardFooter>
                 </ProjectCard>
               ))}
             </ProjectGrid>
@@ -559,7 +588,7 @@ const SidebarTitle = styled.div`
 const SidebarList = styled.ul`
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 8px 0; // 상하 여백 추가
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -567,19 +596,47 @@ const SidebarList = styled.ul`
 
 const SidebarItem = styled.li`
   font-size: 1rem;
-  margin-bottom: 13px;
-  font-weight: 400;
-  color: ${COLOR.text};
-  padding: 8px 24px;
-  border-radius: 8px;
-  margin-left: 12px;
-  margin-right: 12px;
-  transition: background 0.18s;
-  box-sizing: border-box;
+  font-weight: 500; // 폰트 두께를 약간 더 굵게
+  color: ${COLOR.subText}; // 기본 색상을 약간 연하게
+  padding: 12px 24px 12px 36px; // 패딩 조정
+  cursor: pointer;
+  position: relative; // 가상요소(::before)의 위치 기준
+  transition: color 0.2s ease, background-color 0.2s ease;
+
+  // 왼쪽에 강조 표시를 위한 가상 요소
+  &::before {
+    content: "";
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 0;
+    width: 4px;
+    background-color: ${COLOR.accent};
+    border-radius: 2px;
+    transition: height 0.2s ease;
+  }
+
   &:hover {
-    background: ${COLOR.imgBg};
+    color: ${COLOR.text}; // 호버 시 텍스트 색상을 더 진하게
+    background-color: ${COLOR.bg}; // 호버 시 배경색을 약간 어둡게
+
+    &::before {
+      height: 20px; // 호버 시 강조 표시줄 높이 확장
+    }
+  }
+
+  /* 활성화된 항목 스타일 (추후 상태 관리와 연동 필요) */
+  &.active {
+    color: ${COLOR.accentDark};
+    font-weight: 600;
+    background-color: ${COLOR.bg};
+    &::before {
+      height: 24px;
+    }
   }
 `;
+
 
 const SidebarFooter = styled.div`
   font-size: 0.95rem;
@@ -752,20 +809,26 @@ const ProjectGrid = styled.div`
 const ProjectCardImage = styled.img`
   width: 100%;
   aspect-ratio: 16/9;
-  object-fit: contain;
+  object-fit: cover; /* 수정된 부분: 이미지가 컨테이너를 꽉 채우도록 변경 */
   background: ${COLOR.imgBg};
   border-radius: 12px 12px 0 0;
   display: block;
 `;
 
-const ProjectCardLabel = styled.div`
+const CardFooter = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   width: 100%;
+  padding: 16px 20px;
+  box-sizing: border-box;
+`;
+
+const ProjectCardLabel = styled.div`
   font-size: 1.1rem;
-  font-weight: 500;
+  font-weight: 600;
   color: ${COLOR.text};
-  margin-top: 12px;
-  text-align: center;
-  padding: 0 8px 16px 8px;
+  text-align: left;
 `;
 
 const ProjectCard = styled.div`
@@ -790,22 +853,35 @@ const ProjectCard = styled.div`
 `;
 
 const ModifyButton = styled.button`
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  background-color: ${COLOR.subText};
-  color: white;
+  /* position: absolute; // 제거 */
+  /* bottom: 12px; // 제거 */
+  /* right: 12px; // 제거 */
+  background: transparent;
   border: none;
-  border-radius: 15px;
-  padding: 6px 14px;
-  font-size: 0.85rem;
-  font-weight: 500;
+  border-radius: 50%;
+  width: 40px;      /* 명시적인 크기 설정 */
+  height: 40px;     /* 명시적인 크기 설정 */
+  padding: 0;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
   transition: background-color 0.2s;
-  z-index: 5; // 카드 컨텐츠 위에 오도록 설정
+  flex-shrink: 0;   /* 다른 요소에 의해 크기가 줄어들지 않도록 설정 */
 
+  svg {
+    width: 24px;
+    height: 24px;
+    fill: ${COLOR.subText};
+    transition: fill 0.2s;
+  }
+  
   &:hover {
-    background-color: ${COLOR.accentDark};
+    background-color: ${COLOR.bg};
+    svg {
+      fill: ${COLOR.accentDark};
+    }
   }
 `;
 
