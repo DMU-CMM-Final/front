@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 
-// --- 타입 정의 ---
+// 타입 정의
 interface TextBox {
   node: string;
   tId: string;
@@ -32,17 +32,11 @@ interface ImageBox {
 
 type VoteUser = { uId: string, num: number };
 
-
+// ✅ [수정됨] selectedProjectId를 인자로 받습니다.
 export const useObjectManager = (socket: Socket | null, userId: string, selectedProjectId: number | null) => {
   const [textBoxes, setTextBoxes] = useState<TextBox[]>([]);
   const [voteBoxes, setVoteBoxes] = useState<VoteBox[]>([]);
   const [imageBoxes, setImageBoxes] = useState<ImageBox[]>([]);
-
-  // selectedProjectId를 추적할 ref 생성
-  const projectIdRef = useRef(selectedProjectId);
-  useEffect(() => {
-    projectIdRef.current = selectedProjectId;
-  }, [selectedProjectId]);
 
   const onInit = useCallback((data: any) => {
     setTextBoxes(data.texts || []);
@@ -51,8 +45,7 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
   }, []);
 
   const onAddTextBox = useCallback((data: any) => {
-    // prop 대신 ref의 최신 값을 사용
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     const newBoxFromServer: TextBox = {
       node: data.node, tId: data.tId, pId: data.pId, uId: data.uId,
       x: data.cLocate?.x || 10, y: data.cLocate?.y || 10,
@@ -76,34 +69,34 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
       }
       return prev;
     });
-  }, []);
+  }, [selectedProjectId]);
     
   const onUpdateTextBox = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setTextBoxes(prev => prev.map(box => box.node === data.node ? { ...box, 
         text: data.cContent !== undefined ? data.cContent : box.text,
         font: data.cFont !== undefined ? data.cFont : box.font,
         color: data.cColor !== undefined ? data.cColor : box.color,
         size: data.cSize !== undefined ? data.cSize : box.size
       } : box));
-  }, []);
+  }, [selectedProjectId]);
 
   const onMoveTextBox = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setTextBoxes(prev => prev.map(box => 
       box.node === data.node 
         ? { ...box, x: data.cLocate.x, y: data.cLocate.y, width: data.cScale.width, height: data.cScale.height }
         : box
     ));
-  }, []);
+  }, [selectedProjectId]);
 
   const onRemoveTextBox = useCallback((data: { node: string, pId: number }) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setTextBoxes(prev => prev.filter(box => box.node !== data.node));
-  }, []);
+  }, [selectedProjectId]);
     
   const onAddVote = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     const newVote: VoteBox = {
         node: data.node, tId: data.tId, pId: data.pId, uId: data.uId,
         x: data.cLocate?.x || 10, y: data.cLocate?.y || 10,
@@ -116,30 +109,30 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
         if (!boxExists) return [...prev, newVote];
         return prev;
     });
-  }, []);
+  }, [selectedProjectId]);
 
   const onUpdateVote = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setVoteBoxes(prev => prev.map(box => 
       box.node === data.node ? { ...box, title: data.cTitle, list: data.cList } : box
     ));
-  }, []);
+  }, [selectedProjectId]);
 
   const onMoveVote = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setVoteBoxes(prev => prev.map(box => 
       box.node === data.node ? { ...box, x: data.cLocate.x, y: data.cLocate.y, width: data.cScale.width, height: data.cScale.height }
       : box
     ));
-  }, []);
+  }, [selectedProjectId]);
 
   const onRemoveVote = useCallback((data: { node: string, pId: number }) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setVoteBoxes(prev => prev.filter(box => box.node !== data.node));
-  }, []);
+  }, [selectedProjectId]);
 
   const onChoiceVote = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setVoteBoxes(prev => prev.map(box => { 
       if (box.node === data.node) { 
         const newUsers = [ 
@@ -150,10 +143,10 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
       } 
       return box; 
     }));
-  }, []);
+  }, [selectedProjectId]);
     
   const onAddImage = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     const newImage: ImageBox = {
         node: data.node, tId: data.tId, pId: data.pId, uId: data.uId,
         x: data.cLocate?.x || 10, y: data.cLocate?.y || 10,
@@ -165,20 +158,20 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
         if (!boxExists) return [...prev, newImage];
         return prev;
     });
-  }, []);
+  }, [selectedProjectId]);
 
   const onMoveImage = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setImageBoxes(prev => prev.map(box => 
       box.node === data.node ? { ...box, x: data.cLocate.x, y: data.cLocate.y, width: data.cScale.width, height: data.cScale.height }
       : box
     ));
-  }, []);
+  }, [selectedProjectId]);
   
   const onRemoveImage = useCallback((data: { node: string, pId: number }) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (data.pId !== selectedProjectId) return; // 필터링
     setImageBoxes(prev => prev.filter(box => box.node !== data.node));
-  }, []);
+  }, [selectedProjectId]);
 
   useEffect(() => {
     if (!socket) return;

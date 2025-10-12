@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import Draggable from 'react-draggable';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 
 // --- 스타일 컴포넌트 import ---
 import {
@@ -24,22 +23,11 @@ import VoteBoxes from "./components/voteBox";
 import ImageBoxes from "./components/ImageBox";
 import { VideoGrid } from './components/VideoGrid';
 import SummaryModal from './components/SummaryModal';
-import Calendar from './components/Calendar';
-import CalendarModal from './components/CalendarModal';
 
-// 캘린더 이벤트 타입
-interface CalendarEvent {
-  eventId: number;
-  tId: number | null;
-  title: string;
-  description: string;
-  startDate: Date;
-  endDate: Date;
-  isAllDay: boolean;
-}
+const SOCKET_URL = "https://blanksync.o-r.kr";
 
-// 기타 타입 정의
-interface Project { pId: number; pName:string; createDate: string; }
+// 타입 정의
+interface Project { pId: number; pName: string; createDate: string; }
 interface Participant { id: string; color: string; }
 interface TextBox {
   node: string;
@@ -48,17 +36,6 @@ interface TextBox {
   width: number; height: number; text: string; color: string; font: string;
   size: number; zIndex?: number; isOptimistic?: boolean;
 }
-
-// ✨ [추가] 시간대 변환 문제를 해결하기 위한 헬퍼 함수
-// 서버에서 받은 UTC 시간 문자열을 브라우저의 시간대 변환 없이 그대로 Date 객체로 만듭니다.
-const parseUTCStringAsLocal = (dateString: string): Date => {
-  if (!dateString) return new Date();
-  // '2025-10-22T15:55:00.000Z' 형식의 문자열에서 T와 Z를 기준으로 숫자만 추출
-  const parts = dateString.split(/[^0-9]/).map(s => parseInt(s, 10));
-  // new Date(year, month-1, day, hour, minute, second)
-  return new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
-};
-
 
 const generateColor = (id: string) => {
   let hash = 0;
@@ -74,7 +51,6 @@ const generateColor = (id: string) => {
 };
 
 const Teams: React.FC = () => {
-  const { userEmail } = useAuth();
   const mainAreaRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,12 +83,7 @@ const Teams: React.FC = () => {
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [summaryContent, setSummaryContent] = useState('');
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
-
-  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
-  const [calendarDate, setCalendarDate] = useState(new Date());
-  const [showAllEvents, setShowAllEvents] = useState(false);
-
+  
   const { socket } = useSocketManager(String(teamId), userId);
   const socketRef = useRef<Socket | null>(null);
   useEffect(() => { socketRef.current = socket; }, [socket]);
@@ -124,72 +95,6 @@ const Teams: React.FC = () => {
   const otherParticipants = participants.filter(p => p.id !== userId);
 
   const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
-
-  useEffect(() => {
-    if (!socket || !teamId || !userEmail) {
-      setCalendarEvents([]);
-      return;
-    }
-
-    const fetchCalendarEvents = (date: Date) => {
-      const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-      
-      if (showAllEvents) {
-        socket.emit('calendar-all', { uId: userEmail, date: dateParam });
-      } else {
-        socket.emit('calendar-init', { tId: teamId, date: dateParam });
-      }
-    };
-
-    fetchCalendarEvents(calendarDate);
-
-    const handleGenericCalendarData = (data: any) => {
-      console.log('Received calendar data:', data);
-
-      let eventList: any[] = [];
-      let responseTid: number | null = null;
-
-      if (data && !Array.isArray(data) && data.events) {
-        eventList = data.events;
-        responseTid = data.tId || null;
-      }
-      else if (Array.isArray(data) && data.length > 0 && data[0].events) {
-        const payload = data[0];
-        eventList = Array.isArray(payload.events) ? payload.events : [];
-        responseTid = payload.tId || null;
-      }
-      else if (Array.isArray(data)) {
-        eventList = data;
-      }
-
-      const processedEvents: CalendarEvent[] = eventList.map((event: any) => ({
-        ...event,
-        tId: event.tId !== undefined ? event.tId : responseTid,
-        // ✨ [수정] 새로운 헬퍼 함수를 사용하여 Date 객체를 생성합니다.
-        startDate: parseUTCStringAsLocal(event.startDate),
-        endDate: parseUTCStringAsLocal(event.endDate)
-      }));
-      
-      console.log('[데이터 처리 후 최종 결과]', processedEvents);
-      setCalendarEvents(processedEvents);
-    };
-
-    const handleRealtimeUpdate = () => fetchCalendarEvents(calendarDate);
-
-    socket.on('calendar-data', handleGenericCalendarData);
-    socket.on('calendar-all-data', handleGenericCalendarData);
-    socket.on('calendar-event-new', handleRealtimeUpdate);
-    socket.on('calendar-event-updated', handleRealtimeUpdate);
-    socket.on('calendar-event-deleted', handleRealtimeUpdate);
-
-    return () => {
-      socket.off('calendar-data', handleGenericCalendarData);
-      socket.off('calendar-all-data', handleGenericCalendarData);
-      socket.off('calendar-event-new', handleRealtimeUpdate);
-      socket.off('calendar-event-updated', handleRealtimeUpdate);
-      socket.off('calendar-event-deleted', handleRealtimeUpdate);
-    };
-  }, [socket, teamId, userEmail, calendarDate, showAllEvents]);
 
   const handleAttributeChange = (attribute: 'size' | 'color' | 'font', value: any) => {
     setTextBoxes(prev => {
@@ -254,6 +159,10 @@ const Teams: React.FC = () => {
         }
         if (data.projects) {
             setProjects(data.projects);
+            const currentProject = data.projects.find(p => p.pId === teamId);
+            if (currentProject) {
+                setSelectedProjectId(currentProject.pId);
+            }
         }
     };
     
@@ -389,14 +298,10 @@ const Teams: React.FC = () => {
       setFocusedVoteIdx(null);
     }
       
-    if (!mainAreaRef.current || !socket || !selectedProjectId) return;
-    if (!isTextMode && !isVoteCreateMode) return;
-    if (e.target !== mainAreaRef.current) return;
-
+    if (!mainAreaRef.current || !socket || e.target !== mainAreaRef.current || !selectedProjectId) return;
     const rect = mainAreaRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
     if (isTextMode) {
       setIsTextMode(false);
       const tempNodeId = `optimistic-${Date.now()}`;
@@ -415,13 +320,10 @@ const Teams: React.FC = () => {
           cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
           tempNodeId: tempNodeId
       });
-    } else if (isVoteCreateMode) {
+    }
+    if (isVoteCreateMode) {
+      socket.emit("voteEvent", { fnc: "new", type: "vote", pId: selectedProjectId, cLocate: { x, y }, cScale: { width: 300, height: 200 }, cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] });
       setIsVoteCreateMode(false);
-      socket.emit("voteEvent", { 
-        fnc: "new", type: "vote", pId: selectedProjectId, 
-        cLocate: { x, y }, cScale: { width: 300, height: 200 }, 
-        cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] 
-      });
     }
   };
   
@@ -436,7 +338,7 @@ const Teams: React.FC = () => {
     formData.append("cLocate", JSON.stringify({ x: 100, y: 100 }));
     formData.append("cScale", JSON.stringify({ width: 200, height: 200 }));
     try {
-      await fetch(`https://blanksync.o-r.kr/node/api/image/upload`, { method: "POST", body: formData });
+      await fetch(`${SOCKET_URL}/node/api/image/upload`, { method: "POST", body: formData });
     } catch (err) {
       console.error(err);
     }
@@ -453,10 +355,9 @@ const Teams: React.FC = () => {
           <h2>프로젝트 목록</h2>
           <Spacer />
           <ParticipantContainer 
-            onMouseEnter={() => setIsUserListExpanded(true)}
-            onMouseLeave={() => setIsUserListExpanded(false)}
+            onClick={() => setIsUserListExpanded(prev => !prev)}
           >
-            {otherParticipants.slice(0, 4).map((user, index) => (
+            {otherParticipants.map((user, index) => (
               <OverlapAvatarWrapper key={user.id} index={index}>
                   <UserAvatar color={user.color}>
                       {user.id.charAt(0).toUpperCase()}
@@ -465,7 +366,7 @@ const Teams: React.FC = () => {
             ))}
             {isUserListExpanded && (
               <ExpandedUserList>
-                {participants.map(user => (
+                {otherParticipants.map(user => (
                   <UserListItem key={user.id}>
                     <UserAvatar color={user.color}>
                       {user.id.charAt(0).toUpperCase()}
@@ -506,13 +407,6 @@ const Teams: React.FC = () => {
             </ProjectItem>
           ))}
         </ProjectList>
-        
-        <Calendar 
-          onClick={() => setIsCalendarModalOpen(true)}
-          events={calendarEvents}
-          onMonthChange={setCalendarDate}
-        />
-
         <CreateProjectButton onClick={handleCreateProject}>+ 새 프로젝트 생성</CreateProjectButton>
       </SidebarContainer>
 
@@ -534,9 +428,9 @@ const Teams: React.FC = () => {
               <FloatingToolbar ref={toolbarRef}>
                 {focusedIdx === null ? (
                   <>
-                    <ToolIcon onClick={() => { setIsTextMode(prev => !prev); setIsVoteCreateMode(false); }} title="텍스트 상자 생성">T</ToolIcon>
-                    <ToolIcon onClick={() => fileInputRef.current?.click()} title="이미지 추가"><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
-                    <ToolIcon title="그리기"><PenIcon /></ToolIcon>
+                    <ToolIcon onClick={() => setIsTextMode(prev => !prev)} title="텍스트 상자 생성"><p style={{fontWeight: isTextMode ? 'bold' : 'normal'}}>T</p></ToolIcon>
+                    <ToolIcon onClick={() => fileInputRef.current?.click()}><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
+                    <ToolIcon><PenIcon /></ToolIcon>
                   </>
                 ) : (
                   currentBox && (
@@ -595,7 +489,7 @@ const Teams: React.FC = () => {
             <FloatingButtonWrap>
               {showCreateMenu && (
               <CreateMenu>
-                  <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setIsTextMode(false); setShowCreateMenu(false); }}>투표</CreateMenuButton>
+                  <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setShowCreateMenu(false); }}>투표</CreateMenuButton>
                   <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
                   <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
               </CreateMenu>
@@ -615,18 +509,6 @@ const Teams: React.FC = () => {
           </>
         )}
       </MainArea>
-
-      <CalendarModal 
-        isOpen={isCalendarModalOpen} 
-        onClose={() => setIsCalendarModalOpen(false)} 
-        socket={socket}
-        teamId={teamId}
-        events={calendarEvents}
-        activeDate={calendarDate}
-        onMonthChange={setCalendarDate}
-        showAllEvents={showAllEvents}
-        onToggleShowAll={setShowAllEvents}
-      />
     </Container>
   );
 };
