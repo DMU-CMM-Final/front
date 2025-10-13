@@ -24,7 +24,7 @@ import ImageBoxes from "./components/ImageBox";
 import { VideoGrid } from './components/VideoGrid';
 import SummaryModal from './components/SummaryModal';
 
-const SOCKET_URL = "https://blanksync.o-r.kr";
+const SOCKET_URL = "https://3.87.230.137:3000";
 
 // 타입 정의
 interface Project { pId: number; pName: string; createDate: string; }
