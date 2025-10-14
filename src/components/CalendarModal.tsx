@@ -5,7 +5,6 @@ import Holidays from 'date-holidays';
 import { useAuth } from '../contexts/AuthContext';
 
 // --- 타입 정의 ---
-// 컴포넌트에서 사용하는 이벤트 타입. startDate와 endDate를 Date 객체로 정의합니다.
 interface CalendarEvent {
   eventId: number;
   tId: number | null;
@@ -20,7 +19,7 @@ interface CalendarEvent {
 const API_URL = process.env.REACT_APP_API_URL;
 
 
-// --- 스타일 정의 ---
+// --- 스타일 정의 (변경 없음) ---
 const ModalOverlay = styled.div`
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 1100;
@@ -37,7 +36,7 @@ const RightPanelContainer = styled.div`
   margin-left: 24px;
   padding-left: 24px;
   border-left: 1px solid #e0e0e0;
-  min-height: 520px; /* 캘린더 높이와 유사하게 최소 높이 설정 */
+  min-height: 520px;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -63,9 +62,9 @@ const CalendarWrapper = styled.div`
   button.react-calendar__tile--active,
   button.react-calendar__tile--active:enabled:hover,
   button.react-calendar__tile--active:enabled:focus {
-    background: none; /* 배경색 제거 */
+    background: none;
     color: #000;
-    border: 2px solid #B8B6F2; /* 테두리로 선택되었음을 표시 */
+    border: 2px solid #B8B6F2;
     border-radius: 8px;
   }
   .saturday { color: #007bff; }
@@ -88,7 +87,6 @@ const EventHighlighter = styled.div<{ color: string; opacity: number }>`
   background-color: ${(props) => `rgba(${parseInt(props.color.slice(1, 3), 16)}, ${parseInt(props.color.slice(3, 5), 16)}, ${parseInt(props.color.slice(5, 7), 16)}, ${props.opacity})`};
   color: #111; padding: 0 4px; margin-bottom: 2px; border-radius: 3px; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
 `;
-
 const HolidayName = styled.div`
   color: #d93b3b;
   font-size: 0.8rem;
@@ -98,7 +96,6 @@ const HolidayName = styled.div`
   text-overflow: ellipsis;
   width: 100%;
 `;
-
 const Form = styled.form` display: flex; flex-direction: column; gap: 15px; `;
 const FormGroup = styled.div`
   display: flex; flex-direction: column; gap: 5px;
@@ -132,17 +129,16 @@ const EmptyPanel = styled.div`
 const AddEventButton = styled(ActionButton)`
   margin-top: 16px;
 `;
-
 const SearchIcon = styled.div`
   position: absolute; 
-  top: 0px; /* 수정된 부분: 패널의 최상단에 맞춤 */
-  right: 0px; /* 수정된 부분: 패널의 우측 끝에 맞춤 */
+  top: 0px;
+  right: 0px;
   font-size: 1.5rem; 
   cursor: pointer;
   padding: 5px; 
   line-height: 1; 
   &:hover { opacity: 0.7; }
-  z-index: 10; /* 다른 요소 위에 표시되도록 z-index 추가 */
+  z-index: 10;
 `;
 const SearchContainer = styled.div`
   padding: 10px; border-bottom: 1px solid #eee;
@@ -179,29 +175,23 @@ const toDateTimeLocalString = (date: Date) => {
 };
 const toDateInputString = (date: Date) => toDateTimeLocalString(date).slice(0, 10);
 
-// 서버 전송용 날짜 포맷 함수
+// 수정된 부분: 서버와 통신할 때 사용할 날짜 포맷 함수
 const formatDateTimeForServer = (date: Date) => {
     const pad = (num: number) => num.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 
-// HSL 색상 값을 HEX 값으로 변환하는 헬퍼 함수
 const hslToHex = (h: number, s: number, l: number): string => {
-  s /= 100;
-  l /= 100;
+  s /= 100; l /= 100;
   const k = (n: number) => (n + h / 30) % 12;
   const a = s * Math.min(l, 1 - l);
-  const f = (n: number) =>
-    l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
   const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
   return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
 };
 
-// tId를 기반으로 시각적으로 구분되는 고유 색상을 생성하는 함수 (개선된 버전)
 const generateDeterministicColor = (id: number): string => {
-  // 소수(prime number)를 곱하여 hue 값을 더 넓게 분포시켜 색상 중복 가능성을 줄입니다.
   const hue = (id * 37) % 360;
-  // 채도와 명도를 적절한 값으로 고정하여 보기 좋은 색상을 유지합니다.
   const saturation = 70;
   const lightness = 65;
   return hslToHex(hue, saturation, lightness);
@@ -217,10 +207,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
-
-  const [isSearching, setIsSearching] = useState(false); // 검색창 표시 여부
-  const [searchTerm, setSearchTerm] = useState(''); // 검색어
-  const [activeFilterTName, setActiveFilterTName] = useState<string | null>(null); // 현재 적용된 팀 필터 이름
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilterTName, setActiveFilterTName] = useState<string | null>(null);
 
   const [newEvent, setNewEvent] = useState({
     title: '', description: '', startDate: new Date(),
@@ -231,11 +220,10 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         if (isOpen) {
             document.body.style.overflow = 'hidden';
         }
-        // 컴포넌트가 언마운트되거나 모달이 닫힐 때 원래 상태로 복원
         return () => {
             document.body.style.overflow = 'unset';
         };
-    }, [isOpen]); // isOpen 상태가 바뀔 때마다 실행
+    }, [isOpen]);
 
   const getColorForTId = useCallback((tId: number | null): string => {
     if (!tId) {
@@ -252,30 +240,22 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const url = `${API_URL}/spring/calendar?uId=${encodeURIComponent(userEmail)}&date=${encodeURIComponent(dateParam)}`;
     try {
       const response = await fetch(url);
-
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const data: any[] = await response.json();
 
       console.log("Fetched raw calendar data from API:", data);
 
-      const processedEvents: CalendarEvent[] = data.map((event: any) => {
-      const startDate = new Date(event.startDate + 'Z');
-      const endDate = new Date(event.endDate + 'Z');
-
-      return {
+      // 수정된 부분: 시간대 정보가 없는 문자열을 new Date()로 바로 파싱하여 지역 시간으로 인식
+      const processedEvents: CalendarEvent[] = data.map((event: any) => ({
         ...event,
         tId: event.tid,
         tname: event.tname,
-        startDate,
-        endDate,
-      };
-    });
-
+        startDate: new Date(event.startDate),
+        endDate: new Date(event.endDate),
+      }));
       setEvents(processedEvents);
-
     } catch (error) { console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); }
     finally { setLoading(false); }
-
   }, [userEmail]);
 
   useEffect(() => {
@@ -300,7 +280,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         title: '',
         description: '',
         startDate: baseDate,
-        endDate: new Date(baseDate.getTime() + 60 * 60 * 1000), // 시작 시간으로부터 1시간 뒤
+        endDate: new Date(baseDate.getTime() + 60 * 60 * 1000),
         isAllDay: false,
     });
   };
@@ -308,11 +288,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleNewEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
-
-    setNewEvent(prev => ({
-      ...prev,
-      [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value)
-    }));
+    setNewEvent(prev => ({ ...prev, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) }));
   };
 
   const handleSaveEvent = async (e: React.FormEvent) => {
@@ -321,9 +297,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     let finalStartDate: string;
     let finalEndDate: string;
-
+    
+    // 수정된 부분: toISOString() 대신 formatDateTimeForServer 사용
     if (newEvent.isAllDay) {
-        // '하루 종일'이 true이면 시간은 00:00:00 ~ 23:59:59로 설정
         const startOfDay = new Date(newEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
         finalStartDate = formatDateTimeForServer(startOfDay);
@@ -332,7 +308,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         endOfDay.setHours(23, 59, 59, 999);
         finalEndDate = formatDateTimeForServer(endOfDay);
     } else {
-        // '하루 종일'이 false이면 입력된 시간을 그대로 사용
         finalStartDate = formatDateTimeForServer(newEvent.startDate);
         finalEndDate = formatDateTimeForServer(newEvent.endDate);
     }
@@ -342,8 +317,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         title: newEvent.title,
         description: newEvent.description,
         isAllDay: newEvent.isAllDay,
-        startDate: finalStartDate, // 포맷팅된 값으로 변경
-        endDate: finalEndDate,       // 포맷팅된 값으로 변경
+        startDate: finalStartDate,
+        endDate: finalEndDate,
     };
 
     console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
@@ -364,23 +339,18 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (!editingEvent) return;
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
-
-    setEditingEvent({
-      ...editingEvent,
-      [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value)
-    });
+    setEditingEvent({ ...editingEvent, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) });
   };
 
   const handleUpdateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent) { alert("수정할 일정이 없습니다."); return; }
 
-    // 'isAllDay' 값에 따라 startDate와 endDate를 서버 형식에 맞게 포맷팅합니다.
     let finalStartDate: string;
     let finalEndDate: string;
 
+    // 수정된 부분: toISOString() 대신 formatDateTimeForServer 사용
     if (editingEvent.isAllDay) {
-        // '하루 종일'이 true이면 시간은 00:00:00 ~ 23:59:59로 설정합니다.
         const startOfDay = new Date(editingEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
         finalStartDate = formatDateTimeForServer(startOfDay);
@@ -389,7 +359,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         endOfDay.setHours(23, 59, 59, 999);
         finalEndDate = formatDateTimeForServer(endOfDay);
     } else {
-        // '하루 종일'이 false이면 입력된 시간을 그대로 사용합니다.
         finalStartDate = formatDateTimeForServer(editingEvent.startDate);
         finalEndDate = formatDateTimeForServer(editingEvent.endDate);
     }
@@ -400,8 +369,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       title: editingEvent.title,
       description: editingEvent.description,
       isAllDay: editingEvent.isAllDay,
-      startDate: finalStartDate, // 포맷팅된 값으로 변경
-      endDate: finalEndDate,       // 포맷팅된 값으로 변경
+      startDate: finalStartDate,
+      endDate: finalEndDate,
     };
 
     try {
@@ -418,11 +387,8 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const handleDeleteEvent = async (eventId: number) => {
     if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
-
     try {
-      const response = await fetch(`${API_URL}/spring/calendar/delete?id=${eventId}`, {
-        method: 'GET'
-      });
+      const response = await fetch(`${API_URL}/spring/calendar/delete?id=${eventId}`, { method: 'GET' });
       if (!response.ok) throw new Error("일정 삭제에 실패했습니다.");
       setSelectedDate(null);
       await fetchEvents(activeDate);
@@ -439,26 +405,20 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const filteredEvents = useMemo(() => {
     if (!activeFilterTName) {
-      return events; // 적용된 필터가 없으면 모든 일정을 반환
+      return events;
     }
-    // activeFilterTName과 일치하는 팀 이름을 가진 일정만 필터링하여 반환
     return events.filter(event => event.tname === activeFilterTName);
   }, [events, activeFilterTName]);
 
   const allTeamNames = useMemo(() => {
     const teamNames = new Set<string>();
-    events.forEach(event => {
-      if (event.tname) {
-        teamNames.add(event.tname);
-      }
-    });
-    return Array.from(teamNames).sort(); // 알파벳 순으로 정렬
+    events.forEach(event => { if (event.tname) { teamNames.add(event.tname); } });
+    return Array.from(teamNames).sort();
   }, [events]);
 
   const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
       if (view !== 'month') return null;
 
-      // 공휴일 정보를 가져옵니다.
       const holidayInfo = hd.isHoliday(date);
       const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
 
@@ -468,19 +428,14 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           const dayEnd = new Date(date);
           dayEnd.setHours(23, 59, 59, 999);
           
-          // 이벤트의 시작 시간이 하루의 끝보다 전이고, 이벤트의 종료 시간이 하루의 시작보다 뒤라면 해당 날짜에 걸쳐있는 것으로 간주
           return event.startDate <= dayEnd && event.endDate >= dayStart;
       });
 
-      // 공휴일이 있으면 이벤트는 하나만 표시하여 공간을 확보합니다.
       const maxEventsToShow = isPublicHoliday ? 1 : 2;
 
       return (
           <>
-              {/* 공휴일 이름을 렌더링합니다. */}
-              {isPublicHoliday && (
-                  <HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>
-              )}
+              {isPublicHoliday && (<HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>)}
               {dayEvents.slice(0, maxEventsToShow).map(event => (
                   <EventHighlighter
                       key={event.eventId}
@@ -496,13 +451,10 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   const selectedDayEvents = selectedDate ? filteredEvents.filter(event => {
-      // '하루 종일' 이벤트가 우측 패널에 정상적으로 표시되도록 필터링 로직을 수정합니다.
       const dayStart = new Date(selectedDate);
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(selectedDate);
       dayEnd.setHours(23, 59, 59, 999);
-
-      // 이벤트의 시작 시간이 하루의 끝보다 전이고, 이벤트의 종료 시간이 하루의 시작보다 뒤라면 해당 날짜에 걸쳐있는 것으로 간주
       return event.startDate <= dayEnd && event.endDate >= dayStart;
   }) : [];
 
@@ -561,9 +513,9 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
                         .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map(name => (
                             <TeamButton key={name} onClick={() => {
-                                setActiveFilterTName(name); // 팀 이름 클릭 시 필터 적용
-                                setIsSearching(false); // 검색창 닫기
-                                setSearchTerm(''); // 검색어 초기화
+                                setActiveFilterTName(name);
+                                setIsSearching(false);
+                                setSearchTerm('');
                             }}>
                                 {name}
                             </TeamButton>
@@ -635,7 +587,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 if (view === 'month') {
                   const isHoliday = hd.isHoliday(date);
                   const classNames = [];
-                  // isHoliday()는 공휴일이 아니면 false, 공휴일이면 객체/배열을 반환
                   if ((isHoliday && isHoliday.length > 0 && isHoliday[0].type === 'public') || date.getDay() === 0) {
                     classNames.push('holiday');
                   }
