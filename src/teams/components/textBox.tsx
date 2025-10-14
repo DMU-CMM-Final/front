@@ -211,7 +211,7 @@ const TextBoxes: React.FC<TextBoxesProps> = ({
       {textBoxes.map((box, idx) => (
         <TextBoxWrap
           key={box.node || idx}
-          focused={focusedIdx === idx}
+          $focused={focusedIdx === idx}
           style={{ left: box.x, top: box.y, width: box.width, height: box.height, zIndex: box.zIndex ?? 1 }}
           tabIndex={0}
           onFocus={() => { setFocusedIdx(idx); bringToFront(idx); }}
@@ -245,17 +245,17 @@ const TextBoxes: React.FC<TextBoxesProps> = ({
   );
 };
 
-const TextBoxWrap = styled.div<{ focused: boolean }>`
+const TextBoxWrap = styled.div<{ $focused: boolean }>` // ✅ 타입 정의 수정
   position: absolute;
   min-width: ${MIN_WIDTH}px;
   min-height: ${MIN_HEIGHT}px;
   background: transparent;
-  border: 2px solid ${({ focused }) => (focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')};
+  border: 2px solid ${({ $focused }) => ($focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')}; // ✅ 사용 부분 수정
   border-radius: 4px;
   box-sizing: border-box;
   padding: 0;
   &:hover {
-    border-color: ${({ focused }) => (focused ? '#6b5b95' : 'transparent')};
+    border-color: ${({ $focused }) => ($focused ? '#6b5b95' : 'transparent')}; // ✅ 사용 부분 수정
   }
 `;
 
