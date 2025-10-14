@@ -111,7 +111,7 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
       {imageBoxes.map((img, idx) => (
         <ImageBoxWrap
           key={img.node}
-          focused={focusedImageIdx === idx}
+          $focused={focusedImageIdx === idx}
           style={{ left: img.x, top: img.y, width: img.width, height: img.height, zIndex: img.zIndex ?? 1 }}
           tabIndex={0}
           onFocus={() => { setFocusedImageIdx(idx); bringToFront(idx); }}
@@ -134,6 +134,19 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
   );
 };
 
-const ImageBoxWrap = styled.div<{ focused: boolean }>` position: absolute; min-width: ${MIN_WIDTH}px; min-height: ${MIN_HEIGHT}px; background: transparent; border: 2px solid ${({ focused }) => (focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')}; border-radius: 8px; box-sizing: border-box; padding: 0; &:hover { border-color: ${({ focused }) => (focused ? '#6b5b95' : 'transparent')}; } `;
+// ImageBox.tsx
 
+const ImageBoxWrap = styled.div<{ $focused: boolean }>` // ✅ 타입 정의 수정
+  position: absolute;
+  min-width: ${MIN_WIDTH}px;
+  min-height: ${MIN_HEIGHT}px;
+  background: transparent;
+  border: 2px solid ${({ $focused }) => ($focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')}; // ✅ 사용 부분 수정
+  border-radius: 8px;
+  box-sizing: border-box;
+  padding: 0;
+  &:hover {
+    border-color: ${({ $focused }) => ($focused ? '#6b5b95' : 'transparent')}; // ✅ 사용 부분 수정
+  }
+`;
 export default ImageBoxes;
