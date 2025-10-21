@@ -3,10 +3,15 @@ import styled from "styled-components";
 import Header from "../header";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import LoginHandeler from "./loginHandeler";
 import { KAKAO_AUTH_URL } from "./outh";
+import api from "../api";
+import axios from "axios";
 
-const API_URL = process.env.REACT_APP_API_URL;
+interface LoginResponse {
+  accessToken: string;
+  uid: string;
+  role: 'admin' | 'user'; // role이 'admin' 또는 'user'라고 가정
+}
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -29,43 +34,36 @@ const Login: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/users/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ uid: uid, upassword: upassword }),
-      });
+      const response = await api.post<LoginResponse>(
+        "/spring/api/users/login",
+        { uid: uid, upassword: upassword }
+      );
 
-      // 1. 응답이 성공적인지 확인 (e.g., status code 200)
-      if (response.ok) {
-        // 2. 응답을 JSON 형태로 파싱
-        const result = await response.json(); // { uid: "test", role: "admin" } 과 같은 객체를 기대
+      const { accessToken, uid: resultUid, role } = response.data;
 
-        alert("로그인 성공!");
-        
-        // AuthContext의 login 함수 호출
-        login(result.uid);
+      alert("로그인 성공!");
+      
+      login(resultUid);
 
-        // 3. localStorage에 role 정보도 함께 저장
-        const expiresAt = Date.now() + 60 * 60 * 1000; // 1시간 뒤
-        localStorage.setItem("userEmail", result.uid);
-        localStorage.setItem("userRole", result.role); // role 저장
-        localStorage.setItem("expiresAt", expiresAt.toString());
+      localStorage.setItem("accessToken", accessToken);
+      localStorage.setItem("userEmail", resultUid); // 기존 로직 호환 (uid가 이메일이라 가정)
+      localStorage.setItem("userRole", role); // role 저장
 
-        // 4. role 값에 따라 다른 경로로 이동
-        if (result.role === 'admin') {
-          navigate("/traffic"); // admin일 경우 관리자 페이지로
-        } else {
-          navigate("/"); // user 또는 그 외의 경우 메인 페이지로
-        }
-
+      // 4. role 값에 따라 다른 경로로 이동
+      if (role === 'admin') {
+        navigate("/traffic"); // admin일 경우 관리자 페이지로
       } else {
-        alert("아이디 또는 비밀번호가 올바르지 않습니다.");
+        navigate("/"); // user 또는 그 외의 경우 메인 페이지로
       }
+
     } catch (error) {
       console.error("Login error:", error);
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "아이디 또는 비밀번호가 올바르지 않습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }
