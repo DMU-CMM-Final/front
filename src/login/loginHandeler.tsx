@@ -23,30 +23,29 @@ const LoginHandeler = () => {
             },
           }
         );
-        const contentType = response.headers.get("content-type");
-        const text = await response.text();
 
         if (!response.ok) {
-          // 서버가 HTML 에러페이지를 반환할 수도 있으니 text로 에러 표시
+          const text = await response.text();
           alert("로그인 처리 중 오류가 발생했습니다.\n" + text);
           throw new Error(text);
         }
 
-        let userId = text;
-        // JSON 응답이면 id 추출
-        if (contentType && contentType.includes("application/json")) {
-          try {
-            const json = JSON.parse(text);
-            userId = json.id || text;
-          } catch {
-            // 파싱 실패 시 그대로 text 사용
-          }
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          alert("서버 오류: JWT 응답 형식이 올바르지 않습니다.");
+          throw new Error("Invalid response type from server");
         }
-        // id(유저 이메일) 저장
-        localStorage.setItem("userEmail", userId);
-        const expiresAt = Date.now() + 60 * 60 * 1000; // 1시간 뒤
-        localStorage.setItem("expiresAt", expiresAt.toString());
-        if (login) login(userId);
+
+        const result = await response.json();
+        const { accessToken, refreshToken, uid, role } = result;
+
+        localStorage.setItem("accessToken", accessToken);
+        localStorage.setItem("refreshToken", refreshToken);
+        localStorage.setItem("userEmail", uid); // 기존 로직 호환 (uid가 이메일이라 가정)
+        if (role) { // role 정보가 있는 경우 저장
+          localStorage.setItem("userRole", role);
+        }
+        if (login) login(uid);
 
         setLoginDone(true); // 중복 호출 방지
 
