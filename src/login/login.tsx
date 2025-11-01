@@ -21,7 +21,7 @@ const Login: React.FC = () => {
   const { login } = useAuth();
 
   const NAVER_CLIENT_ID = "YqfWThdztNwv006mYBBW";
-  const NAVER_REDIRECT_URI = "localhost:80/spring/naver/callback";
+  const NAVER_REDIRECT_URI = "https://blanksync.o-r.kr/spring/naver/callback";
   const NAVER_STATE = "random_state_string"; // CSRF 방지용 임의 문자열
 
   const NAVER_AUTH_URL =

@@ -25,7 +25,7 @@ const NaverLoginHandeler = () => {
     const naverLogin = async () => {
       try {
         const response = await fetch(
-          `spring/naver/callback`,
+          `/spring/naver/callback`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -48,10 +48,9 @@ const NaverLoginHandeler = () => {
         }
 
         const result = await response.json();
-        const { accessToken, refreshToken, uid, role } = result;
+        const { accessToken, uid, role } = result;
 
         localStorage.setItem("accessToken", accessToken);
-        localStorage.setItem("refreshToken", refreshToken);
         localStorage.setItem("userEmail", uid); // 기존 로직 호환 (uid가 이메일이라 가정)
         if (role) { // role 정보가 있는 경우 저장
           localStorage.setItem("userRole", role);
