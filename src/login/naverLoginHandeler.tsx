@@ -25,7 +25,7 @@ const NaverLoginHandeler = () => {
     const naverLogin = async () => {
       try {
         const response = await fetch(
-          `/naver/callback`,
+          `/spring/naver/callback`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
