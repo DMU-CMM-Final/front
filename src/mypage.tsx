@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components";
 import Header from "./header";
+import api from "./api";
 
 type UserData = {
   uid: string;
   uname: string;
   upassword: string;
 };
-
-const API_URL = process.env.REACT_APP_API_URL;
 
 const Mypage: React.FC = () => {
 
@@ -34,23 +33,18 @@ const Mypage: React.FC = () => {
 
       try {
         // 2. 백엔드 API로 POST 요청 보내기
-        const response = await fetch(`${API_URL}/spring/api/users/mypage`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ uid: userEmail }), // 백엔드로 사용자 이메일 전송
+        const response = await api.post<UserData>('/spring/api/users/mypage', { 
+          uid: userEmail 
         });
 
-        if (!response.ok) {
-          throw new Error("마이페이지 정보를 불러오는 데 실패했습니다.");
-        }
-
-        const data: UserData = await response.json();
-
-        setUserData(data); // 3. 성공 시 받아온 데이터로 상태 업데이트
+        setUserData(response.data);
       } catch (err: any) {
-        setError(err.message); // 4. 실패 시 에러 상태 업데이트
+        if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          setError(responseData?.message || "마이페이지 정보를 불러오는 데 실패했습니다.");
+        } else {
+          setError(err.message); 
+        }
       } finally {
         setLoading(false); // 5. 로딩 종료
       }
@@ -84,23 +78,20 @@ const Mypage: React.FC = () => {
     if (!editedData) return;
 
     try {
-      const response = await fetch(`${API_URL}/spring/api/users/update`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editedData), // 수정된 데이터를 백엔드로 전송
-      });
+      await api.post('/spring/api/users/update', editedData);
 
-      if (!response.ok) {
-        throw new Error("정보 업데이트에 실패했습니다.");
-      }
-      
       // 성공 시
-      setUserData(editedData); // 기본 유저 정보도 업데이트
-      setIsEditing(false); // 보기 모드로 전환
+      setUserData(editedData); 
+      setIsEditing(false); 
       alert("성공적으로 수정되었습니다.");
 
     } catch (err: any) {
-      alert(err.message);
+      if (err && typeof err === 'object' && 'response' in err) {
+        const responseData = (err as any).response?.data;
+        alert(responseData?.message || "정보 업데이트에 실패했습니다.");
+      } else {
+        alert(err.message);
+      }
     }
   };
 

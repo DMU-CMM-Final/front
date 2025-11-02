@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import styled from "styled-components";
 import Header from "./header";
 import { useLocation, useNavigate } from "react-router-dom";
+import api from "./api";
 
 // 📈 1. Chart.js 관련 모듈을 임포트
 import {
@@ -46,8 +47,13 @@ type Project = {
   pname: string;
 };
 
-// --- API URL ---
-const API_URL = process.env.REACT_APP_API_URL;
+interface LeaderPageData { 
+  tname: string;
+  count: number;
+  members: TeamMember[];
+  project: Project[];
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // --- 요청하신 새 컬러 팔레트 ---
@@ -87,7 +93,7 @@ const TeamBarChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
           data: scores,
           backgroundColor: GRAPH_COLOR.bar,
           borderRadius: 4,
-          barThickness: 30,
+          maxBarThickness: 100,
         },
       ],
     };
@@ -107,7 +113,7 @@ const TeamBarChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
     scales: {
       y: {
         beginAtZero: true, // y축은 0부터 시작
-        max: 100,          // 👈 Y축의 최댓값을 100으로 설정
+        max: 100,       
         grid: {
           color: COLOR.border,
         },
@@ -241,6 +247,7 @@ const Leader: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { teamId } = location.state || {}; // ProjectList에서 넘겨받은 teamId
+  const currentUserEmail = localStorage.getItem("userEmail");
 
   // --- 상태 관리 (Mock Data 제거) ---
   const [teamName, setTeamName] = useState<string>("");
@@ -269,23 +276,24 @@ const Leader: React.FC = () => {
         }
         setLoading(true); // 데이터 요청 시작 시 로딩 상태 활성화
         try {
-            const response = await fetch(`${API_URL}/spring/api/teams/page`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ tid: teamId }),
-            });
-            if (!response.ok) throw new Error("팀 정보를 불러오는데 실패했습니다.");
-            const data = await response.json();
+          const response = await api.post<LeaderPageData>('/spring/api/teams/page', { 
+            tid: teamId 
+          });
 
-            // 👇 여기에 로그를 추가하여 API 응답 전체와 members 배열을 확인합니다.
-            console.log('API에서 받은 전체 데이터:', data);
-            setTeamName(data.tname || "팀 이름 없음");
-            setTotalMeetings(data.count || 10); // count가 없으면 기본값 10
-            setTeamMembers(data.members || []); // members가 없으면 빈 배열
-            setProjects(data.project || []);
+          const data = response.data;
 
+          console.log('API에서 받은 전체 데이터:', data);
+          setTeamName(data.tname || "팀 이름 없음");
+          setTotalMeetings(data.count || 10); 
+          setTeamMembers(data.members || []); 
+          setProjects(data.project || []);
         } catch (err: any) {
-            setError(err.message);
+          if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          setError(responseData?.message || "팀 정보를 불러오는데 실패했습니다.");
+        } else {
+          setError(err.message);
+        }
         } finally {
             setLoading(false);
         }    
@@ -298,27 +306,24 @@ const Leader: React.FC = () => {
   const handleDeleteMember = async (memberUid: string) => {
         if (window.confirm(`정말로 팀원 '${memberUid}'님을 삭제하시겠습니까?`)) {
         try {
-            const response = await fetch(`${API_URL}/spring/api/teams/mem/delete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                tid: teamId,      // 현재 팀 ID
-                uid: memberUid,   // 삭제할 팀원의 ID
-            }),
-            });
+          await api.post('/spring/api/teams/mem/delete', {
+          tid: teamId,     
+          uid: memberUid,  
+          });
 
-            if (!response.ok) {
-            throw new Error("팀원 삭제에 실패했습니다.");
-            }
-
-            // API 요청 성공 시, 화면(state)에서도 해당 팀원 제거
-            setTeamMembers(prevMembers =>
-            prevMembers.filter(member => member.uid !== memberUid)
-            );
-            alert("팀원이 성공적으로 삭제되었습니다.");
+          // API 요청 성공 시, 화면(state)에서도 해당 팀원 제거
+          setTeamMembers(prevMembers =>
+          prevMembers.filter(member => member.uid !== memberUid)
+          );
+          alert("팀원이 성공적으로 삭제되었습니다.");
 
         } catch (err: any) {
-            alert(err.message);
+          if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "팀원 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
         }
         }
     };
@@ -349,17 +354,13 @@ const Leader: React.FC = () => {
 
     setIsAddingMember(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/message`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tid: teamId,
-          uid: memberEmail,
-          senduid: currentUserEmail,
-        }),
+      const response = await api.post<string>('/spring/api/teams/message', {
+        tid: teamId,
+        uid: memberEmail,
+        senduid: localStorage.getItem("userEmail"),
       });
-      const text = await response.text();
-      const mid = parseInt(text, 10);
+
+      const mid = parseInt(response.data, 10);
 
       if (!isNaN(mid) && mid !== 0) {
         alert("팀원 요청 성공!");
@@ -370,7 +371,12 @@ const Leader: React.FC = () => {
         alert("팀원 요청에 실패했습니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀원 요청에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setIsAddingMember(false);
     }
@@ -380,23 +386,20 @@ const Leader: React.FC = () => {
   const handleDeleteInvitation = async (midToDelete: number) => {
     setIsAddingMember(true); // 버튼 비활성화를 위해 로딩 상태 사용
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/message/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mid: midToDelete,
-        }),
+      await api.post('/spring/api/teams/message/delete', {
+        mid: midToDelete,
       });
 
-      if (!response.ok) {
-        throw new Error("초대 취소에 실패했습니다.");
-      }
       alert("팀원 초대가 취소되었습니다.");
       setNewlyInvitedMembers(prev => prev.filter(member => member.mid !== midToDelete));
-      await fetchLeaderData(); // 메인 팀원 리스트도 갱신
-
+      await fetchLeaderData();
     } catch (error: any) {
-      alert(error.message);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "초대 취소에 실패했습니다.");
+      } else {
+        alert(error.message);
+      }
     } finally {
       setIsAddingMember(false);
     }
@@ -405,21 +408,18 @@ const Leader: React.FC = () => {
   const handleDeleteTeam = async () => {
     if (window.confirm(`정말로 '${teamName}' 팀을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) {
       try {
-        const response = await fetch(`${API_URL}/spring/api/teams/delete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tid: teamId }),
-        });
-
-        if (!response.ok) {
-          throw new Error("팀 삭제에 실패했습니다.");
-        }
+        await api.post('/spring/api/teams/delete', { tid: teamId });
 
         alert("팀이 성공적으로 삭제되었습니다.");
-        navigate("/projectList"); // 삭제 후 프로젝트 목록 페이지로 이동
+        navigate("/projectList");
 
       } catch (err: any) {
-        alert(err.message);
+        if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "팀 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
       }
     }
   };
@@ -437,18 +437,10 @@ const Leader: React.FC = () => {
     }
     setIsAddingProject(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/projnew`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tid: teamId,
-          pname: newProjectName,
-        }),
+      await api.post('/spring/api/teams/projnew', {
+        tid: teamId,
+        pname: newProjectName,
       });
-
-      if (!response.ok) {
-        throw new Error("프로젝트 추가에 실패했습니다.");
-      }
 
       alert("프로젝트가 성공적으로 추가되었습니다.");
       await fetchLeaderData(); // 데이터를 새로고침하여 추가된 프로젝트를 반영
@@ -456,7 +448,12 @@ const Leader: React.FC = () => {
 
     } catch (error: any) {
       console.error("프로젝트 추가 오류:", error);
-      alert(error.message);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "프로젝트 추가에 실패했습니다.");
+      } else {
+        alert(error.message);
+      }
     } finally {
       setIsAddingProject(false);
     }
@@ -467,25 +464,21 @@ const Leader: React.FC = () => {
     
     if (window.confirm(`정말로 '${projectName}' 프로젝트를 삭제하시겠습니까?`)) {
       try {
-        const response = await fetch(`${API_URL}/spring/api/teams/projdel`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tid: teamId,
-            pid: pidToDelete,
-          }),
+        await api.post('/spring/api/teams/projdel', {
+          tid: teamId,
+          pid: pidToDelete,
         });
 
-        if (!response.ok) {
-          throw new Error("프로젝트 삭제에 실패했습니다.");
-        }
-
         alert("프로젝트가 성공적으로 삭제되었습니다.");
-        await fetchLeaderData(); // 데이터를 다시 불러와 목록을 갱신합니다.
-
+        await fetchLeaderData();
       } catch (err: any) {
         console.error("프로젝트 삭제 오류:", err);
-        alert(err.message);
+        if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "프로젝트 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
       }
     }
   };
@@ -527,7 +520,10 @@ const Leader: React.FC = () => {
                         참여점수: {member.score} | 회의참석: {member.attend}회 
                       </MemberStats>
                     </MemberInfoContainer>
-                    <SmallButton onClick={() => handleDeleteMember(member.uid)}>
+                    <SmallButton 
+                      onClick={() => handleDeleteMember(member.uid)}
+                      disabled={member.uid === currentUserEmail} 
+                    >
                       삭제
                     </SmallButton>
                   </ListItem>
@@ -783,6 +779,19 @@ const SmallButton = styled.button`
     color: white;
     border-color: ${GRAPH_COLOR.danger};
   }
+
+  &:disabled {
+    background: ${COLOR.imgBg};
+    color: ${COLOR.subText};
+    border-color: ${COLOR.border};
+    cursor: not-allowed;
+    
+    /* 비활성화 시 호버 효과 제거 */
+    &:hover {
+      background: ${COLOR.imgBg};
+      color: ${COLOR.subText};
+      border-color: ${COLOR.border};
+    }
 `;
 
 const AddButton = styled.button`

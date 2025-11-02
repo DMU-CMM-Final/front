@@ -3,8 +3,7 @@ import styled from "styled-components";
 import { useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
 import CalendarModal from "./components/CalendarModal";
-
-const API_URL = process.env.REACT_APP_API_URL;
+import api from "./api";
 
 type TeamsResponse = {
   uname: string;
@@ -55,18 +54,12 @@ const ProjectList: React.FC = () => {
   const fetchTeams = useCallback(async () => {
     if (!userEmail) return; // userEmail이 없으면 실행하지 않음
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/list`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: userEmail }),
+      const response = await api.post<TeamsResponse>('/spring/api/teams/list', { 
+        uid: userEmail 
       });
-
-      if (!response.ok) {
-        throw new Error("팀 목록을 불러오는데 실패했습니다.");
-      }
       
       // Spring에서 보내주는 새로운 데이터 구조({ uname, teamList })에 맞게 타입을 지정합니다.
-      const data: TeamsResponse = await response.json();
+      const data: TeamsResponse = response.data;
 
       console.log("서버로부터 받은 데이터:", data);
 
@@ -75,7 +68,12 @@ const ProjectList: React.FC = () => {
       setTeams(data.team || []);    // 팀 목록 상태 업데이트
 
     } catch (error) {
-      console.error("Error fetching teams:", error);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀 목록 로딩에 실패했습니다.");
+      } else {
+        alert('팀 목록을 불러오는 중 오류가 발생했습니다.');
+      }
     }
   }, [userEmail]); // userEmail이 변경될 때만 함수가 재생성됨
 
@@ -100,24 +98,24 @@ const ProjectList: React.FC = () => {
   // 메시지 모달 열기
   const handleMailClick = async () => {
     try {
-      const response = await fetch(`${API_URL}/spring/api/users/message`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: userEmail }),
+      const response = await api.post<MessageData[]>('/spring/api/users/message', { 
+        uid: userEmail 
       });
-      if (!response.ok) {
-        throw new Error(`서버 오류: ${response.status}`);
-      }
-      // 새로운 MessageData 타입으로 데이터를 받습니다.
-      const data: MessageData[] = await response.json();
+      
+      const data: MessageData[] = response.data;
       
       // 데이터가 없을 경우를 대비해 항상 배열을 보장합니다.
       setMessages(data || []);
       setShowMessage(true);
 
     } catch (e) {
-      alert("메시지 불러오기에 실패했습니다.");
-      setMessages([]); // 에러 발생 시 빈 배열로 초기화
+      if (e && typeof e === 'object' && 'response' in e) {
+        const responseData = (e as any).response?.data;
+        alert(responseData?.message || "메시지 로딩에 실패했습니다.");
+      } else {
+        alert("메시지 불러오기에 실패했습니다.");
+      }
+      setMessages([]);
     }
   };
 
@@ -137,21 +135,13 @@ const ProjectList: React.FC = () => {
       return;
     }
     try {
-      const response = await fetch(`${API_URL}/spring/api/users/message/choice`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mid: message.mid,
-          tid: message.tid,        // 팀 ID
-          uid: message.senduid,    // 초대를 보낸 사람의 ID
-          senduid: userEmail,      // 응답하는 사람(현재 로그인한 유저)의 ID
-          bool: choice,            // 수락/거절 여부
-        }),
+      await api.post('/spring/api/users/message/choice', {
+        mid: message.mid,
+        tid: message.tid,     
+        uid: message.senduid, 
+        senduid: userEmail,   
+        bool: choice,         
       });
-      
-      if (!response.ok) {
-        throw new Error(`서버 오류: ${response.status}`);
-      }
 
       if (choice) {
         await fetchTeams();
@@ -160,7 +150,12 @@ const ProjectList: React.FC = () => {
       alert(choice ? "팀 초대를 수락하였습니다." : "팀 초대를 거절하였습니다.");
       setMessages((msgs) => msgs.filter((msg) => msg !== message));
     } catch (e) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (e && typeof e === 'object' && 'response' in e) {
+        const responseData = (e as any).response?.data;
+        alert(responseData?.message || "응답 처리에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     }
   };
 
@@ -174,24 +169,21 @@ const ProjectList: React.FC = () => {
 
     try {
       // API 서버에 메시지 삭제 요청
-      const response = await fetch(`${API_URL}/spring/api/users/message/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mid: message.mid,
-        }),
+      await api.post('/spring/api/users/message/delete', {
+        mid: message.mid,
       });
-
-      if (!response.ok) {
-        throw new Error("메시지 삭제에 실패했습니다.");
-      }
 
       // API 요청 성공 시에만 화면에서 메시지 제거
       setMessages((msgs) => msgs.filter((msg) => msg !== message));
       alert("메시지를 삭제했습니다.");
 
     } catch (e: any) {
-      alert(e.message || "서버와의 통신에 실패했습니다.");
+      if (e && typeof e === 'object' && 'response' in e) {
+        const responseData = (e as any).response?.data;
+        alert(responseData?.message || "메시지 삭제에 실패했습니다.");
+      } else {
+        alert(e.message || "서버와의 통신에 실패했습니다.");
+      }
     }
   };
 
@@ -223,16 +215,7 @@ const ProjectList: React.FC = () => {
     if (window.confirm("정말로 프로젝트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) {
       try {
         // --- 추가된 API 호출 로직 ---
-        const response = await fetch(`${API_URL}/spring/api/teams/delete`, {
-          method: "POST", // 또는 서버에서 요구하는 HTTP 메소드 (예: DELETE)
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tid: tid }), // 팀 ID를 JSON으로 전송
-        });
-
-        if (!response.ok) {
-          // 서버에서 에러 응답이 온 경우
-          throw new Error("프로젝트 삭제에 실패했습니다.");
-        }
+        await api.post('/spring/api/teams/delete', { tid: tid });
         
         // --- API 호출 성공 시 ---
         alert("프로젝트가 성공적으로 삭제되었습니다.");
@@ -242,7 +225,12 @@ const ProjectList: React.FC = () => {
         
       } catch (error) {
         console.error("Error deleting project:", error);
-        alert("프로젝트 삭제 중 오류가 발생했습니다.");
+        if (error && typeof error === 'object' && 'response' in error) {
+          const responseData = (error as any).response?.data;
+          alert(responseData?.message || "프로젝트 삭제에 실패했습니다.");
+        } else {
+          alert("프로젝트 삭제 중 오류가 발생했습니다.");
+        }
       } finally {
         // 성공하든 실패하든 메뉴는 닫기
         setEditingTeam(null);
@@ -254,15 +242,7 @@ const ProjectList: React.FC = () => {
     if (window.confirm("정말로 이 팀을 나가시겠습니까?")) {
       try {
         // 팀 나가기 API 호출
-        const response = await fetch(`${API_URL}/spring/api/teams/exit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tid: tid, uid: userEmail }),
-        });
-
-        if (!response.ok) {
-          throw new Error("팀 나가기에 실패했습니다.");
-        }
+        await api.post('/spring/api/teams/exit', { tid: tid, uid: userEmail });
         
         alert("팀에서 성공적으로 나갔습니다.");
         
@@ -271,7 +251,12 @@ const ProjectList: React.FC = () => {
 
       } catch (error) {
         console.error("Error leaving team:", error);
-        alert("팀 나가기 처리 중 오류가 발생했습니다.");
+        if (error && typeof error === 'object' && 'response' in error) {
+          const responseData = (error as any).response?.data;
+          alert(responseData?.message || "팀 나가기에 실패했습니다.");
+        } else {
+          alert("팀 나가기 처리 중 오류가 발생했습니다.");
+        }
       } finally {
         setEditingTeam(null); // 메뉴 닫기
       }

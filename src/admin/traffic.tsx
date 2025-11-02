@@ -14,9 +14,7 @@ import {
 import { Line, Bar } from 'react-chartjs-2';
 import './css/traffic.css';
 import Header from '../header';
-
-// API 주소
-const API_URL = process.env.REACT_APP_API_URL;
+import api from '../api';
 
 // --- 1. 서버 데이터의 타입을 정의하는 인터페이스 추가 ---
 interface ServerInfo {
@@ -129,16 +127,9 @@ const Traffic = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch(`${API_URL}/spring/api/admin/page`, {
-          method: "POST",
-        });
+        const response = await api.post<AdminPageData>('/spring/api/admin/page');
 
-        if (!response.ok) {
-          throw new Error('서버 응답에 실패했습니다.');
-        }
-        
-        // --- 3. fetch로 받아온 데이터에 타입 적용 ---
-        const data: AdminPageData = await response.json();
+        const data: AdminPageData = response.data;
 
         setCpu(Math.round(data.cpu));
         setRam(Math.round(data.ram));
@@ -206,6 +197,13 @@ const Traffic = () => {
 
       } catch (error) {
         console.error("데이터를 가져오는 중 오류 발생:", error);
+
+        if (error && typeof error === 'object' && 'response' in error) {
+          const responseData = (error as any).response?.data;
+          alert(responseData?.message || "데이터 로딩에 실패했습니다.");
+        } else {
+          alert('데이터를 가져오는 중 오류가 발생했습니다.');
+        }
       } finally {
         setLoading(false);
       }

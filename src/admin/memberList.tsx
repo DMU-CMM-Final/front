@@ -2,10 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import './css/memberList.css';
 import Header from '../header';
-import { data } from 'react-router-dom';
-
-// API 주소
-const API_URL = process.env.REACT_APP_API_URL;
+import api from '../api';
 
 // upassword가 null일 수 있음을 타입에 명시
 interface MemberInfo {
@@ -43,14 +40,17 @@ const MemberList = () => {
   const fetchMembers = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/admin/user`, {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error('서버 응답에 실패했습니다.');
-      const data: MemberInfo[] = await response.json();
-      setMemberList(data);
+      const response = await api.post<MemberInfo[]>('/spring/api/admin/user');
+      setMemberList(response.data);
     } catch (error) {
       console.error("회원 목록을 가져오는 중 오류 발생:", error);
+
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "회원 목록 로딩에 실패했습니다.");
+      } else {
+        alert('회원 목록을 가져오는 중 오류가 발생했습니다.');
+      }
     } finally {
       setLoading(false);
     }
@@ -86,27 +86,21 @@ const MemberList = () => {
     }
 
     try {
-      // 서버에 새 회원 정보 전송 (요청하신 엔드포인트로 수정)
-      const response = await fetch(`${API_URL}/spring/api/admin/user/new`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newUser), // newUser state를 JSON으로 변환하여 전송
-      });
-
-      if (!response.ok) {
-        throw new Error('회원 추가에 실패했습니다.');
-      }
+      await api.post('/spring/api/admin/user/new', newUser);
 
       await fetchMembers(); 
 
       alert('새로운 회원이 추가되었습니다.');
-      handleCloseAddModal(); // 모달 닫기
+      handleCloseAddModal();
 
     } catch (error) {
       console.error('회원 추가 중 오류 발생:', error);
-      alert('회원 추가 중 오류가 발생했습니다.');
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "회원 추가에 실패했습니다.");
+      } else {
+        alert('회원 추가 중 오류가 발생했습니다.');
+      }
     }
   };
 
@@ -138,17 +132,8 @@ const MemberList = () => {
     };
 
     try {
-      // 서버로 수정 요청 전송 (기존과 동일)
-      const response = await fetch(`${API_URL}/spring/api/users/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      await api.post('/spring/api/users/update', payload);
 
-      if (!response.ok) throw new Error('회원 정보 수정에 실패했습니다.');
-
-      // --- ✨ 2. 성공 시 목록 UI 업데이트 로직 수정 ---
-      // 비밀번호를 수정했을 수도 있으므로, 목록 전체를 다시 불러와 최신 상태를 유지
       await fetchMembers();
 
       alert('회원 정보가 수정되었습니다.');
@@ -156,7 +141,12 @@ const MemberList = () => {
 
     } catch (error) {
       console.error('회원 정보 수정 중 오류 발생:', error);
-      alert('회원 정보 수정 중 오류가 발생했습니다.');
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "회원 정보 수정에 실패했습니다.");
+      } else {
+        alert('회원 정보 수정 중 오류가 발생했습니다.');
+      }
     }
   };
 
@@ -166,24 +156,19 @@ const MemberList = () => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/spring/api/admin/user/delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // 3. 프론트엔드의 uid 값을 body에 담아 서버로 전송합니다.
-        body: JSON.stringify({ uid: member.uid }),
-      });
+      await api.post('/spring/api/admin/user/delete', { uid: member.uid });
 
-      if (!response.ok) {
-        throw new Error('회원 삭제에 실패했습니다.');
-      }
-      
-      // 4. 성공 시 화면 목록에서 해당 회원을 즉시 제거합니다.
       setMemberList(prevList => prevList.filter(m => m.uid !== member.uid));
       alert('회원이 삭제되었습니다.');
 
     } catch (error) {
       console.error('회원 삭제 중 오류 발생:', error);
-      alert('회원 삭제 중 오류가 발생했습니다.');
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "회원 삭제에 실패했습니다.");
+      } else {
+        alert('회원 삭제 중 오류가 발생했습니다.');
+      }
     }
   };
 
