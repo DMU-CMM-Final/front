@@ -120,6 +120,14 @@ const DetailButton = styled.button`
   padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid #ccc;
   background-color: #fff; cursor: pointer; &:hover { background-color: #f0f0f0; }
 `;
+const TeamEventNote = styled.p`
+  font-size: 0.8rem;
+  color: #888;
+  text-align: right;
+  margin: 10px 0 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+`;
 const EmptyPanel = styled.div`
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   height: 100%; color: #888; text-align: center;
@@ -568,13 +576,17 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {selectedDayEvents.length > 0 ? (
             selectedDayEvents.map(event => (
               <EventDetailCard key={event.eventId}>
-                <h4>{event.title}</h4>
+                <h4>{event.title} {event.tname && `(${event.tname})`}</h4>
                 <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} ~ ${event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}</p>
                 <p><strong>상세:</strong><br />{event.description}</p>
-                <DetailButtonContainer>
-                    <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
-                    <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
-                </DetailButtonContainer>
+                {event.tId === null ? (
+                  <DetailButtonContainer>
+                      <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
+                      <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
+                  </DetailButtonContainer>
+                ) : (
+                  <TeamEventNote>팀 일정은 이 곳에서 수정/삭제할 수 없습니다.</TeamEventNote>
+                )}
               </EventDetailCard>
             ))
           ) : (

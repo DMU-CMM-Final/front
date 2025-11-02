@@ -152,6 +152,9 @@ const Traffic = () => {
 
           setMaxTraffic(paddedMax);
         }
+
+        console.log("API에서 받은 원본 data.server:", data.server);
+        console.log("차트 X축 레이블로 변환된 serverLabels:", serverLabels);
         
         setLineData({
           labels: serverLabels,
