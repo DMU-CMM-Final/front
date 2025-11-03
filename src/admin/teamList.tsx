@@ -2,11 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import './css/teamList.css';
 import Header from '../header';
-
-// API 주소
-const API_URL = process.env.REACT_APP_API_URL;
-
-// --- 1. 서버에서 받아올 데이터와 컴포넌트에서 사용할 데이터의 타입을 정의 ---
+import api from '../api';
 
 // 서버 응답 데이터의 타입
 interface FetchedMemberInfo {
@@ -51,11 +47,8 @@ const TeamList = () => {
     const fetchTeams = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`${API_URL}/spring/api/admin/team`, {
-          method: "POST",
-        });
-        if (!response.ok) throw new Error('서버 응답에 실패했습니다.');
-        const data: FetchedTeamInfo[] = await response.json();
+        const response = await api.post<FetchedTeamInfo[]>('/spring/api/admin/team');
+        const data: FetchedTeamInfo[] = response.data;
         const formattedData: TeamData[] = data.map(team => ({
           id: team.tid,
           name: team.tname,
@@ -66,6 +59,12 @@ const TeamList = () => {
         setTeamList(formattedData);
       } catch (error) {
         console.error("팀 데이터를 가져오는 중 오류 발생:", error);
+        if (error && typeof error === 'object' && 'response' in error) {
+          const responseData = (error as any).response?.data;
+          alert(responseData?.message || "팀 데이터 로딩에 실패했습니다.");
+        } else {
+          alert('팀 데이터를 가져오는 중 오류가 발생했습니다.');
+        }
       } finally {
         setLoading(false);
       }
@@ -83,17 +82,8 @@ const TeamList = () => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/spring/api/admin/team/list`, {
-        method: "POST",
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tid: teamId }),
-      });
-
-      if (!response.ok) throw new Error('팀원 목록을 불러오는데 실패했습니다.');
-
-      // --- 2. JSON 배열 형식의 응답 처리 ---
-      // 텍스트가 아닌 JSON으로 파싱합니다.
-      const memberData: FetchedMemberInfo[] = await response.json();
+      const response = await api.post<FetchedMemberInfo[]>('/spring/api/admin/team/list', { tid: teamId });
+      const memberData: FetchedMemberInfo[] = response.data;
 
       // --- 3. 팀장을 제외하고, 필요한 데이터만 추출하여 가공 ---
       const members: TeamMember[] = memberData
@@ -115,6 +105,12 @@ const TeamList = () => {
 
     } catch (error) {
       console.error("팀원 목록을 가져오는 중 오류 발생:", error);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀원 목록 로딩에 실패했습니다.");
+      } else {
+        alert('팀원 목록을 가져오는 중 오류가 발생했습니다.');
+      }
     }
   };
 
@@ -149,18 +145,7 @@ const TeamList = () => {
 
     try {
       // 3. 서버로 수정 요청 API 호출
-      const response = await fetch(`${API_URL}/spring/api/admin/team/update`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        // 서버에서 에러 응답이 오면 예외 발생
-        throw new Error('팀 정보 업데이트에 실패했습니다.');
-      }
+      await api.post('/spring/api/admin/team/update', payload);
 
       // 4. API 호출 성공 시, 프론트엔드의 목록 상태도 업데이트
       const updatedList = teamList.map(team =>
@@ -175,7 +160,12 @@ const TeamList = () => {
 
     } catch (error) {
       console.error("팀 정보 수정 중 오류 발생:", error);
-      alert('오류가 발생했습니다. 다시 시도해주세요.');
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀 정보 수정에 실패했습니다.");
+      } else {
+        alert('오류가 발생했습니다. 다시 시도해주세요.');
+      }
     }
   };
 
@@ -187,17 +177,7 @@ const TeamList = () => {
 
     try {
       // 서버로 삭제 요청 API 호출
-      const response = await fetch(`${API_URL}/spring/api/teams/delete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ tid: teamId }), // 서버에 삭제할 팀의 ID 전송
-      });
-
-      if (!response.ok) {
-        throw new Error('팀 삭제에 실패했습니다.');
-      }
+      await api.post('/spring/api/teams/delete', { tid: teamId });
 
       // API 호출 성공 시, 프론트엔드의 목록(state)에서도 해당 팀을 제거
       setTeamList(currentList => currentList.filter(team => team.id !== teamId));
@@ -205,7 +185,12 @@ const TeamList = () => {
 
     } catch (error) {
       console.error("팀 삭제 중 오류 발생:", error);
-      alert('팀 삭제 중 오류가 발생했습니다.');
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀 삭제에 실패했습니다.");
+      } else {
+        alert('팀 삭제 중 오류가 발생했습니다.');
+      }
     }
   };
 

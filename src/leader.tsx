@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import styled from "styled-components";
 import Header from "./header";
 import { useLocation, useNavigate } from "react-router-dom";
+import api from "./api";
 
 // 📈 1. Chart.js 관련 모듈을 임포트
 import {
@@ -30,7 +31,7 @@ ChartJS.register(
 // --- API 연동을 위한 타입 정의 ---
 type TeamMember = {
   uid: string;
-  uname: string; // 👈 사용자 이름 필드 추가
+  uname: string; 
   score: number;
   attend: number;
   count: number;
@@ -46,8 +47,13 @@ type Project = {
   pname: string;
 };
 
-// --- API URL ---
-const API_URL = process.env.REACT_APP_API_URL;
+interface LeaderPageData { 
+  tname: string;
+  count: number;
+  members: TeamMember[];
+  project: Project[];
+}
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // --- 요청하신 새 컬러 팔레트 ---
@@ -87,7 +93,7 @@ const TeamBarChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
           data: scores,
           backgroundColor: GRAPH_COLOR.bar,
           borderRadius: 4,
-          barThickness: 30,
+          maxBarThickness: 100,
         },
       ],
     };
@@ -107,7 +113,7 @@ const TeamBarChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
     scales: {
       y: {
         beginAtZero: true, // y축은 0부터 시작
-        max: 100,          // 👈 Y축의 최댓값을 100으로 설정
+        max: 100,       
         grid: {
           color: COLOR.border,
         },
@@ -129,29 +135,13 @@ const TeamBarChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
   return <Bar options={options} data={chartData} />;
 };
 
+interface DonutProps {
+  averageScore: number;
+  status: string;
+}
+
 // --- 팀원 전체 참여도 도넛 차트 ---
-const OverallScoreDonutChart: React.FC<{ members: TeamMember[] }> = ({ members }) => {
-
-  // 평균 점수와 상태 텍스트를 계산합니다.
-  const { averageScore, status } = useMemo(() => {
-    if (!members || members.length === 0) {
-      return { averageScore: 0, status: "데이터 없음" };
-    }
-
-    const totalScore = members.reduce((sum, member) => sum + member.score, 0);
-    const average = totalScore / members.length;
-
-    let currentStatus = '위험';
-    if (average >= 75) {
-      currentStatus = '최상';
-    } else if (average >= 50) {
-      currentStatus = '양호';
-    } else if (average >= 25) {
-      currentStatus = '경고';
-    }
-
-    return { averageScore: Math.round(average), status: currentStatus };
-  }, [members]);
+const OverallScoreDonutChart: React.FC<DonutProps> = ({ averageScore, status }) => {
 
   // 도넛 차트 데이터를 설정합니다. (평균 점수, 100 - 평균 점수)
   const chartData = {
@@ -190,12 +180,10 @@ const OverallScoreDonutChart: React.FC<{ members: TeamMember[] }> = ({ members }
 // 📈 3. 회의 참석율 바 차트 컴포넌트를 새로 만듭니다.
 const AttendanceBarChart: React.FC<{ members: TeamMember[] ,totalMeetings: number }> = ({ members, totalMeetings }) => {
     
-  const { chartData, maxCount } = useMemo(() => {
+  const { chartData } = useMemo(() => {
     const labels = members.map(member => member.uname);
     const attendanceData = members.map(member => member.attend);
-    // count 값 중 최댓값을 찾아 y축의 max로 사용합니다. 팀원이 없으면 기본값 10으로 설정합니다.
-    const maxVal = members.length > 0 ? Math.max(...members.map(member => member.count)) : 10;
-
+    
     return {
       chartData: {
         labels,
@@ -205,11 +193,10 @@ const AttendanceBarChart: React.FC<{ members: TeamMember[] ,totalMeetings: numbe
             data: attendanceData,
             backgroundColor: GRAPH_COLOR.line, // 기존 라인 색상 활용
             borderRadius: 4,
-            barThickness: 30,
+            maxBarThickness: 100,
           },
         ],
       },
-      maxCount: maxVal,
     };
   }, [members]);
 
@@ -241,8 +228,9 @@ const Leader: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { teamId } = location.state || {}; // ProjectList에서 넘겨받은 teamId
+  const currentUserEmail = localStorage.getItem("userEmail");
 
-  // --- 상태 관리 (Mock Data 제거) ---
+  // --- 상태 관리 ---
   const [teamName, setTeamName] = useState<string>("");
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [totalMeetings, setTotalMeetings] = useState<number>(10);
@@ -250,7 +238,7 @@ const Leader: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- 모달 관련 상태 추가 ---
+  // --- 모달 관련 상태 ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [memberEmail, setMemberEmail] = useState(""); // 모달 내 이메일 입력
   const [newlyInvitedMembers, setNewlyInvitedMembers] = useState<InvitedMemberInModal[]>([]); // 모달 내에서 추가된 이메일 목록
@@ -269,23 +257,24 @@ const Leader: React.FC = () => {
         }
         setLoading(true); // 데이터 요청 시작 시 로딩 상태 활성화
         try {
-            const response = await fetch(`/spring/api/teams/page`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ tid: teamId }),
-            });
-            if (!response.ok) throw new Error("팀 정보를 불러오는데 실패했습니다.");
-            const data = await response.json();
+          const response = await api.post<LeaderPageData>('/spring/api/teams/page', { 
+            tid: teamId 
+          });
 
-            // 👇 여기에 로그를 추가하여 API 응답 전체와 members 배열을 확인합니다.
-            console.log('API에서 받은 전체 데이터:', data);
-            setTeamName(data.tname || "팀 이름 없음");
-            setTotalMeetings(data.count || 10); // count가 없으면 기본값 10
-            setTeamMembers(data.members || []); // members가 없으면 빈 배열
-            setProjects(data.project || []);
+          const data = response.data;
 
+          console.log('API에서 받은 전체 데이터:', data);
+          setTeamName(data.tname || "팀 이름 없음");
+          setTotalMeetings(data.count || 10); 
+          setTeamMembers(data.members || []); 
+          setProjects(data.project || []);
         } catch (err: any) {
-            setError(err.message);
+          if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          setError(responseData?.message || "팀 정보를 불러오는데 실패했습니다.");
+        } else {
+          setError(err.message);
+        }
         } finally {
             setLoading(false);
         }    
@@ -298,27 +287,24 @@ const Leader: React.FC = () => {
   const handleDeleteMember = async (memberUid: string) => {
         if (window.confirm(`정말로 팀원 '${memberUid}'님을 삭제하시겠습니까?`)) {
         try {
-            const response = await fetch(`/spring/api/teams/mem/delete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                tid: teamId,      // 현재 팀 ID
-                uid: memberUid,   // 삭제할 팀원의 ID
-            }),
-            });
+          await api.post('/spring/api/teams/mem/delete', {
+          tid: teamId,     
+          uid: memberUid,  
+          });
 
-            if (!response.ok) {
-            throw new Error("팀원 삭제에 실패했습니다.");
-            }
-
-            // API 요청 성공 시, 화면(state)에서도 해당 팀원 제거
-            setTeamMembers(prevMembers =>
-            prevMembers.filter(member => member.uid !== memberUid)
-            );
-            alert("팀원이 성공적으로 삭제되었습니다.");
+          // API 요청 성공 시, 화면(state)에서도 해당 팀원 제거
+          setTeamMembers(prevMembers =>
+          prevMembers.filter(member => member.uid !== memberUid)
+          );
+          alert("팀원이 성공적으로 삭제되었습니다.");
 
         } catch (err: any) {
-            alert(err.message);
+          if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "팀원 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
         }
         }
     };
@@ -349,17 +335,13 @@ const Leader: React.FC = () => {
 
     setIsAddingMember(true);
     try {
-      const response = await fetch(`/spring/api/teams/message`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tid: teamId,
-          uid: memberEmail,
-          senduid: currentUserEmail,
-        }),
+      const response = await api.post<string>('/spring/api/teams/message', {
+        tid: teamId,
+        uid: memberEmail,
+        senduid: localStorage.getItem("userEmail"),
       });
-      const text = await response.text();
-      const mid = parseInt(text, 10);
+
+      const mid = parseInt(response.data, 10);
 
       if (!isNaN(mid) && mid !== 0) {
         alert("팀원 요청 성공!");
@@ -370,7 +352,12 @@ const Leader: React.FC = () => {
         alert("팀원 요청에 실패했습니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀원 요청에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setIsAddingMember(false);
     }
@@ -380,23 +367,20 @@ const Leader: React.FC = () => {
   const handleDeleteInvitation = async (midToDelete: number) => {
     setIsAddingMember(true); // 버튼 비활성화를 위해 로딩 상태 사용
     try {
-      const response = await fetch(`/spring/api/teams/message/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mid: midToDelete,
-        }),
+      await api.post('/spring/api/teams/message/delete', {
+        mid: midToDelete,
       });
 
-      if (!response.ok) {
-        throw new Error("초대 취소에 실패했습니다.");
-      }
       alert("팀원 초대가 취소되었습니다.");
       setNewlyInvitedMembers(prev => prev.filter(member => member.mid !== midToDelete));
-      await fetchLeaderData(); // 메인 팀원 리스트도 갱신
-
+      await fetchLeaderData();
     } catch (error: any) {
-      alert(error.message);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "초대 취소에 실패했습니다.");
+      } else {
+        alert(error.message);
+      }
     } finally {
       setIsAddingMember(false);
     }
@@ -405,21 +389,18 @@ const Leader: React.FC = () => {
   const handleDeleteTeam = async () => {
     if (window.confirm(`정말로 '${teamName}' 팀을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) {
       try {
-        const response = await fetch(`/spring/api/teams/delete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tid: teamId }),
-        });
-
-        if (!response.ok) {
-          throw new Error("팀 삭제에 실패했습니다.");
-        }
+        await api.post('/spring/api/teams/delete', { tid: teamId });
 
         alert("팀이 성공적으로 삭제되었습니다.");
-        navigate("/projectList"); // 삭제 후 프로젝트 목록 페이지로 이동
+        navigate("/projectList");
 
       } catch (err: any) {
-        alert(err.message);
+        if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "팀 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
       }
     }
   };
@@ -437,18 +418,10 @@ const Leader: React.FC = () => {
     }
     setIsAddingProject(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/teams/projnew`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tid: teamId,
-          pname: newProjectName,
-        }),
+      await api.post('/spring/api/teams/projnew', {
+        tid: teamId,
+        pname: newProjectName,
       });
-
-      if (!response.ok) {
-        throw new Error("프로젝트 추가에 실패했습니다.");
-      }
 
       alert("프로젝트가 성공적으로 추가되었습니다.");
       await fetchLeaderData(); // 데이터를 새로고침하여 추가된 프로젝트를 반영
@@ -456,7 +429,12 @@ const Leader: React.FC = () => {
 
     } catch (error: any) {
       console.error("프로젝트 추가 오류:", error);
-      alert(error.message);
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "프로젝트 추가에 실패했습니다.");
+      } else {
+        alert(error.message);
+      }
     } finally {
       setIsAddingProject(false);
     }
@@ -467,28 +445,56 @@ const Leader: React.FC = () => {
     
     if (window.confirm(`정말로 '${projectName}' 프로젝트를 삭제하시겠습니까?`)) {
       try {
-        const response = await fetch(`${API_URL}/spring/api/teams/projdel`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tid: teamId,
-            pid: pidToDelete,
-          }),
+        await api.post('/spring/api/teams/projdel', {
+          tid: teamId,
+          pid: pidToDelete,
         });
 
-        if (!response.ok) {
-          throw new Error("프로젝트 삭제에 실패했습니다.");
-        }
-
         alert("프로젝트가 성공적으로 삭제되었습니다.");
-        await fetchLeaderData(); // 데이터를 다시 불러와 목록을 갱신합니다.
-
+        await fetchLeaderData();
       } catch (err: any) {
         console.error("프로젝트 삭제 오류:", err);
-        alert(err.message);
+        if (err && typeof err === 'object' && 'response' in err) {
+          const responseData = (err as any).response?.data;
+          alert(responseData?.message || "프로젝트 삭제에 실패했습니다.");
+        } else {
+          alert(err.message);
+        }
       }
     }
   };
+
+  // KPI 계산 로직
+  const { averageScore, teamStatus } = useMemo(() => {
+    if (!teamMembers || teamMembers.length === 0) {
+      return { averageScore: 0, teamStatus: "데이터 없음" };
+    }
+
+    const totalScore = teamMembers.reduce((sum, member) => sum + member.score, 0);
+    const average = totalScore / teamMembers.length;
+
+    let currentStatus = '위험';
+    if (average >= 75) {
+      currentStatus = '최상';
+    } else if (average >= 50) {
+      currentStatus = '양호';
+    } else if (average >= 25) {
+      currentStatus = '경고';
+    }
+
+    return { averageScore: Math.round(average), teamStatus: currentStatus };
+  }, [teamMembers]);
+
+  // 평균 참석율 KPI 계산
+  const averageAttendanceRate = useMemo(() => {
+    if (!teamMembers || teamMembers.length === 0 || totalMeetings === 0) {
+      return 0;
+    }
+    const totalAttendance = teamMembers.reduce((sum, member) => sum + member.attend, 0);
+    // (총 참석 횟수 / (팀원 수 * 총 회의 수)) * 100
+    const rate = (totalAttendance / (teamMembers.length * totalMeetings)) * 100;
+    return Math.round(rate);
+  }, [teamMembers, totalMeetings]);
 
   return (
     <Container>
@@ -500,6 +506,25 @@ const Leader: React.FC = () => {
             팀 삭제하기
           </DeleteTeamLink>
         </PageHeader>
+
+        <KpiGrid>
+          <KpiCard>
+            <KpiTitle>총 팀원</KpiTitle>
+            <KpiValue>{teamMembers.length}명</KpiValue>
+          </KpiCard>
+          <KpiCard>
+            <KpiTitle>진행중 프로젝트</KpiTitle>
+            <KpiValue>{projects.length}건</KpiValue>
+          </KpiCard>
+          <KpiCard>
+            <KpiTitle>팀 평균 참여도</KpiTitle>
+            <KpiValue>{averageScore}%</KpiValue>
+          </KpiCard>
+          <KpiCard>
+            <KpiTitle>팀 평균 참석율</KpiTitle>
+            <KpiValue>{averageAttendanceRate}%</KpiValue>
+          </KpiCard>
+        </KpiGrid>
 
         <TopSection>
           <Card>
@@ -519,19 +544,29 @@ const Leader: React.FC = () => {
             {teamMembers.length > 0 ? (
               <List>
                 {/* teamMembers 배열을 순회하며 각 멤버의 상세 정보를 표시합니다. */}
-                {teamMembers.map((member) => (
-                  <ListItem key={member.uid}>
+                {teamMembers.map((member) => {
+                  const attendanceRate = totalMeetings > 0 
+                    ? Math.round((member.attend / totalMeetings) * 100) 
+                    : 0;
+                  const isAtRisk = member.score < 25; // "위험" 기준
+
+                  return (
+                    <ListItem key={member.uid} $isAtRisk={isAtRisk}>
                     <MemberInfoContainer>
                       <MemberUID>{member.uname}({member.uid})</MemberUID>
                       <MemberStats>
-                        참여점수: {member.score} | 회의참석: {member.attend}회 
+                        참여점수: {member.score} | 회의참석: {member.attend}회 ({attendanceRate}%) 
                       </MemberStats>
                     </MemberInfoContainer>
-                    <SmallButton onClick={() => handleDeleteMember(member.uid)}>
+                    <SmallButton 
+                      onClick={() => handleDeleteMember(member.uid)}
+                      disabled={member.uid === currentUserEmail} 
+                    >
                       삭제
                     </SmallButton>
                   </ListItem>
-                ))}
+                  );
+                })}
               </List>
             ) : (
               <EmptyListMessage>현재 팀에 팀원이 없습니다.</EmptyListMessage>
@@ -543,7 +578,7 @@ const Leader: React.FC = () => {
         <BottomSection>
           <SectionTitle>팀원 참여도</SectionTitle>
           <ChartsGrid>
-            <ChartCard>
+            <ChartCard style={{ gridArea: 'score' }}> {/* 1. 팀원별 참여도 */}
               <CardTitle>팀원별 참여도</CardTitle>
               {/* 📈 4. 기존의 정적 바 그래프 UI를 동적 Chart.js 컴포넌트로 교체합니다. */}
               <BarChartContainer>
@@ -555,16 +590,18 @@ const Leader: React.FC = () => {
                 )}
               </BarChartContainer>
             </ChartCard>
-            <ChartCard>
+
+            <ChartCard style={{ gridArea: 'overall' }}> {/* 2. 팀원 전체 참여도 */}
               <CardTitle>팀원 전체 참여도</CardTitle>
               {/* 📈 4. 기존의 정적 도넛 UI를 동적 Chart.js 컴포넌트로 교체합니다. */}
               {!loading ? (
-                <OverallScoreDonutChart members={teamMembers} />
+                <OverallScoreDonutChart averageScore={averageScore} status={teamStatus} />
               ) : (
                  <EmptyListMessage>데이터 로딩 중...</EmptyListMessage>
               )}
             </ChartCard>
-            <ChartCard>
+
+            <ChartCard style={{ gridArea: 'attendance' }}> {/* 3. 회의 참석율 */}
               <CardTitle>회의 참석율 (횟수)</CardTitle>
               {/* 📈 4. 기존 SVG를 새로운 Bar Chart 컴포넌트로 교체 */}
               <BarChartContainer>
@@ -736,6 +773,39 @@ const Card = styled.div`
   flex-direction: column;
 `;
 
+const KpiGrid = styled.section`
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+`;
+
+const KpiCard = styled(Card)`
+  padding: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.5rem;
+`;
+
+const KpiTitle = styled.h3`
+  font-size: 1rem;
+  font-weight: 600;
+  color: ${COLOR.subText};
+  margin: 0;
+`;
+
+const KpiValue = styled.p`
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: ${COLOR.text};
+  margin: 0;
+`;
+
 const CardTitle = styled.h2`
   font-size: 1.5rem;
   font-weight: 700;
@@ -751,14 +821,17 @@ const List = styled.ul`
   flex-grow: 1;
 `;
 
-const ListItem = styled.li`
+const ListItem = styled.li<{ $isAtRisk?: boolean }>`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: ${COLOR.imgBg};
   border-radius: 8px;
   padding: 0.8rem 1rem;
   margin-bottom: 0.8rem;
+  transition: all 0.2s ease;
+
+  border: 2px solid ${props => props.$isAtRisk ? GRAPH_COLOR.danger : 'transparent'};
+  background-color: ${props => props.$isAtRisk ? '#fceeee' : COLOR.imgBg};
 `;
 
 const ItemText = styled.span`
@@ -783,6 +856,19 @@ const SmallButton = styled.button`
     color: white;
     border-color: ${GRAPH_COLOR.danger};
   }
+
+  &:disabled {
+    background: ${COLOR.imgBg};
+    color: ${COLOR.subText};
+    border-color: ${COLOR.border};
+    cursor: not-allowed;
+    
+    /* 비활성화 시 호버 효과 제거 */
+    &:hover {
+      background: ${COLOR.imgBg};
+      color: ${COLOR.subText};
+      border-color: ${COLOR.border};
+    }
 `;
 
 const AddButton = styled.button`
@@ -817,8 +903,21 @@ const SectionTitle = styled.h2`
 
 const ChartsGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr; /* 3개의 열 대신 1개의 열을 사용 */
   gap: 2rem;
+
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto;
+  grid-template-areas:
+    "score overall"
+    "attendance attendance";
+
+  @media (max-width: 900px) { /* 👈 모바일에서는 1열로 스택 */
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "score"
+      "overall"
+      "attendance";
+  }
 `;
 
 const ChartCard = styled(Card)`
@@ -839,7 +938,8 @@ const DonutChartContainer = styled.div`
     height: 150px;
     display: flex;
     align-items: center;
-    justify-content: center;s
+    justify-content: center;
+    margin-top: 2rem;
 `;
 
 const DonutText = styled.div`

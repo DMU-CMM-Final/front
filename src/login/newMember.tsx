@@ -2,8 +2,8 @@ import React, { useState, useRef } from "react";
 import styled from "styled-components";
 import Header from "../header";
 import { useNavigate } from "react-router-dom";
+import api from "../api";
 
-const API_URL = process.env.REACT_APP_API_URL;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 const NewMember: React.FC = () => {
@@ -26,16 +26,14 @@ const NewMember: React.FC = () => {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/spring/api/users/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uid: email,
-          uname: name,
-          upassword: password
-        })
+      const response = await api.post<boolean>('/spring/api/users/register', {
+        uid: email,
+        uname: name,
+        upassword: password
       });
-      const result = await response.json();
+      
+      const result = response.data;
+
       if (result === true) {
         alert("회원가입이 완료되었습니다!");
         navigate("/login");
@@ -43,7 +41,12 @@ const NewMember: React.FC = () => {
         alert("회원가입에 실패했습니다. 이미 등록된 이메일일 수 있습니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "회원가입에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }
@@ -56,19 +59,23 @@ const NewMember: React.FC = () => {
     }
     setLoading(true);
     try {
-      const queryParams = new URLSearchParams({ id: email }).toString();
-      const response = await fetch(`${API_URL}/spring/api/users/check-id?${queryParams}`, {
-        method: "GET",
-        headers: { "Content-Type": "application/json" }
+      const response = await api.get<boolean>('/spring/api/users/check-id', {
+        params: { id: email }
       });
-      const result = await response.json();
+      
+      const result = response.data;
       if (result === false) {
         alert("사용 가능한 이메일입니다.");
       } else {
         alert("이미 사용 중인 이메일입니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "중복 확인 중 오류가 발생했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }

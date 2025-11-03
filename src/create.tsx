@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import styled from "styled-components";
 import Header from "./header";
 import { useNavigate } from "react-router-dom";
+import api from "./api";
 
 const COLOR = {
   bg: "#EDE9F2",
@@ -50,19 +51,13 @@ const Create: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`/spring/api/teams/create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          tname: teamName,
-          uid: creatorEmail
-        })
+      const response = await api.post<string>('/spring/api/teams/create', {
+        tname: teamName,
+        uid: creatorEmail
       });
 
-      const text = await response.text();      // 응답을 문자열로 받음
-      const tid = parseInt(text, 10);         // 문자열을 int로 변환
+      const text = response.data;      // 응답을 문자열로 받음
+      const tid = parseInt(text, 10);  // 문자열을 int로 변환
 
       if (!isNaN(tid) && tid > 0) {
         alert(`팀 "${teamName}" 생성 성공! (팀 ID: ${tid})`);
@@ -72,7 +67,12 @@ const Create: React.FC = () => {
         alert("팀 생성에 실패했습니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀 생성에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }
@@ -107,19 +107,13 @@ const Create: React.FC = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`/spring/api/teams/message`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          tid: tid,
-          uid: memberEmail,
-          senduid: senderEmail
-        })
+      const response = await api.post<string>('/spring/api/teams/message', {
+        tid: tid,
+        uid: memberEmail,
+        senduid: localStorage.getItem("userEmail")
       });
 
-      const text = await response.text();
+      const text = response.data;
       const mid = parseInt(text, 10);
 
       if (!isNaN(mid) && mid !== 0) {
@@ -131,7 +125,12 @@ const Create: React.FC = () => {
         alert("팀원 요청에 실패했습니다.");
       }
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "팀원 요청에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }
@@ -141,20 +140,20 @@ const Create: React.FC = () => {
   const handleDeleteEmail = async (midToDelete: number) => {
     setLoading(true);
     try {
-      const response = await fetch(`/spring/api/teams/message/delete`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          mid: midToDelete,
-        })
+      await api.post('/spring/api/teams/message/delete', {
+        mid: midToDelete,
       });
+
       // 상태를 업데이트할 때도 email이 아닌 mid를 기준으로 필터링합니다.
       setInvitedMembers(invitedMembers.filter((member) => member.mid !== midToDelete));
       alert("팀원 요청이 취소되었습니다!");
     } catch (error) {
-      alert("서버와의 통신에 실패했습니다.");
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "요청 취소에 실패했습니다.");
+      } else {
+        alert("서버와의 통신에 실패했습니다.");
+      }
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import Holidays from 'date-holidays';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../api';
 
 // --- 타입 정의 ---
 interface CalendarEvent {
@@ -15,9 +16,6 @@ interface CalendarEvent {
   endDate: Date;
   isAllDay: boolean;
 }
-
-const API_URL = process.env.REACT_APP_API_URL;
-
 
 // --- 스타일 정의 (변경 없음) ---
 const ModalOverlay = styled.div`
@@ -121,6 +119,14 @@ const DetailButtonContainer = styled.div`
 const DetailButton = styled.button`
   padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid #ccc;
   background-color: #fff; cursor: pointer; &:hover { background-color: #f0f0f0; }
+`;
+const TeamEventNote = styled.p`
+  font-size: 0.8rem;
+  color: #888;
+  text-align: right;
+  margin: 10px 0 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
 `;
 const EmptyPanel = styled.div`
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -237,11 +243,15 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setLoading(true);
 
     const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-    const url = `/spring/calendar?uId=${encodeURIComponent(userEmail)}&date=${encodeURIComponent(dateParam)}`;
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data: any[] = await response.json();
+      const response = await api.get<any[]>('/spring/calendar', {
+        params: {
+          uId: userEmail,
+          date: dateParam
+        }
+      });
+
+      const data: any[] = response.data;
 
       console.log("Fetched raw calendar data from API:", data);
 
@@ -254,7 +264,16 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         endDate: new Date(event.endDate),
       }));
       setEvents(processedEvents);
-    } catch (error) { console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); }
+    } catch (error) { 
+      console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); 
+
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "캘린더 데이터 로딩에 실패했습니다.");
+      } else {
+        alert('캘린더 데이터를 가져오는 데 실패했습니다.');
+      }
+    }
     finally { setLoading(false); }
   }, [userEmail]);
 
@@ -298,7 +317,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     let finalStartDate: string;
     let finalEndDate: string;
     
-    // 수정된 부분: toISOString() 대신 formatDateTimeForServer 사용
     if (newEvent.isAllDay) {
         const startOfDay = new Date(newEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
@@ -324,15 +342,20 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
 
     try {
-        const response = await fetch(`/spring/calender/new`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error("일정 저장에 실패했습니다.");
+        await api.post('/spring/calendar/new', payload);
+        
         setIsAddingEvent(false);
         await fetchEvents(activeDate);
-    } catch (error) { console.error(error); alert(String(error)); }
+    } catch (error) { 
+      console.error(error); alert(String(error)); 
+
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "일정 저장에 실패했습니다.");
+      } else {
+        alert(String(error)); 
+      }
+    }
   };
 
   const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -349,7 +372,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     let finalStartDate: string;
     let finalEndDate: string;
 
-    // 수정된 부분: toISOString() 대신 formatDateTimeForServer 사용
     if (editingEvent.isAllDay) {
         const startOfDay = new Date(editingEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
@@ -374,27 +396,41 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
     };
 
     try {
-      const response = await fetch(`/spring/calender/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error("일정 수정에 실패했습니다.");
+      await api.post('/spring/calendar/update', payload);
+
       setEditingEvent(null);
       await fetchEvents(activeDate);
-    } catch (error) { console.error(error); alert(String(error)); }
+    } catch (error) { 
+      console.error(error); alert(String(error)); 
+
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "일정 수정에 실패했습니다.");
+      } else {
+        alert(String(error)); 
+      }
+    }
   };
 
   const handleDeleteEvent = async (eventId: number) => {
     if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
     try {
-      const response = await fetch(`/spring/calender/delete?eventId=${eventId}`, {
-        method: 'GET' // 명시적으로 GET으로 설정 (기본값이 GET이긴 함)
+      await api.get('/spring/calendar/delete', { 
+        params: { id: eventId } 
       });
-      if (!response.ok) throw new Error("일정 삭제에 실패했습니다.");
+
       setSelectedDate(null);
       await fetchEvents(activeDate);
-    } catch (error) { console.error(error); alert(String(error)); }
+    } catch (error) { 
+      console.error(error); alert(String(error)); 
+
+      if (error && typeof error === 'object' && 'response' in error) {
+        const responseData = (error as any).response?.data;
+        alert(responseData?.message || "일정 삭제에 실패했습니다.");
+      } else {
+        alert(String(error)); 
+      }
+    }
   };
 
   const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => { if (activeStartDate) setActiveDate(activeStartDate); };
@@ -540,13 +576,17 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           {selectedDayEvents.length > 0 ? (
             selectedDayEvents.map(event => (
               <EventDetailCard key={event.eventId}>
-                <h4>{event.title}</h4>
+                <h4>{event.title} {event.tname && `(${event.tname})`}</h4>
                 <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} ~ ${event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}</p>
                 <p><strong>상세:</strong><br />{event.description}</p>
-                <DetailButtonContainer>
-                    <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
-                    <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
-                </DetailButtonContainer>
+                {event.tId === null ? (
+                  <DetailButtonContainer>
+                      <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
+                      <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
+                  </DetailButtonContainer>
+                ) : (
+                  <TeamEventNote>팀 일정은 이 곳에서 수정/삭제할 수 없습니다.</TeamEventNote>
+                )}
               </EventDetailCard>
             ))
           ) : (
