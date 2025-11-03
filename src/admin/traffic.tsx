@@ -134,11 +134,23 @@ const Traffic = () => {
         setCpu(Math.round(data.cpu));
         setRam(Math.round(data.ram));
 
-        // 이제 's'는 'ServerInfo' 타입으로, 't'는 'TeamInfo' 타입으로 자동 인식됩니다.
         const serverLabels = data.server.map(s => {
-          const date = new Date(s.time);
-          return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+          try {
+            // s.time이 "2025-11-02T09:00:00" 형식이라고 가정합니다.
+            // 1. 'T'를 기준으로 문자열을 자릅니다. -> ["2025-11-02", "09:00:00"]
+            // 2. 두 번째 요소("09:00:00")를 선택합니다.
+            const timePart = s.time.split('T')[1]; 
+            
+            // 3. 앞에서부터 5글자("09:00")만 잘라냅니다.
+            return timePart.substring(0, 5); 
+          } catch (e) {
+            // 혹시 s.time 형식이 예상과 다를 경우 (null, undefined, T가 없는 경우)
+            // 오류가 나지 않도록 예외처리를 합니다.
+            console.error("시간 문자열 변환 오류:", s.time);
+            return "??:??";
+          }
         });
+        
         const serverTrafficData = data.server.map(s => s.traffic);
 
         // --- 4. 받아온 데이터로 Y축 최댓값 계산 및 설정 ---
