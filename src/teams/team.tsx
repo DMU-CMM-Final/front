@@ -3,7 +3,6 @@ import { Socket } from 'socket.io-client';
 import Draggable from 'react-draggable';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import api from '../api';
 import {
   Container, SidebarContainer, SidebarToggle, ProjectHeader, Spacer,
   ParticipantContainer, OverlapAvatarWrapper, UserAvatar, UserName, ProjectList,
@@ -16,7 +15,7 @@ import {
 } from './Team.styles';
 import { useSocketManager } from './hooks/useSocketManager';
 import { useWebRTC } from './hooks/useWebRTC';
-import { useObjectManager, DrawingStroke } from './hooks/useObjectManager';
+import { useObjectManager, DrawingStroke } from './hooks/useObjectManager'; // DrawingStroke 타입 임포트
 import TextBoxes from "./components/textBox";
 import VoteBoxes from "./components/voteBox";
 import ImageBoxes from "./components/ImageBox";
@@ -80,17 +79,9 @@ const Teams: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  const { userId, teamId } = location.state || {}; // 🚀 [수정] 테스트용 하드코딩 제거
-  //const userId = "dg0319@naver.com"; // 테스트용
-  //const teamId = "1"; // 테스트용
-
-  useEffect(() => {
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      alert("로그인이 필요합니다. 로그인 페이지로 이동합니다.");
-      navigate('/login');
-    }
-  }, [navigate]);
+  const { userId, teamId } = location.state || {};
+  // const userId = "dg0319@naver.com"; // 테스트용
+  // const teamId = "1"; // 테스트용
 
 
   // --- 상태 관리 ---
@@ -508,14 +499,14 @@ const Teams: React.FC = () => {
     }
   };
 
-  // 🚀 [추가] 서버의 그림 데이터 저장 요청 리스너
+  // 서버의 그림 데이터 저장 요청 리스너
   useEffect(() => {
     if (!socket || !selectedProjectId) return;
     const handleRequestDrawingData = (data: { reason: string }) => {
       console.log(`Server requested drawing data (reason: ${data.reason})`);
       socket.emit('save-drawing-data', {
         pId: selectedProjectId,
-        canvasData: drawingsRef.current.filter(s => s.pId === selectedProjectId), // 🚀 현재 프로젝트의 획만 전송
+        canvasData: drawingsRef.current.filter(s => s.pId === selectedProjectId),
         reason: data.reason
       });
     };
@@ -525,7 +516,7 @@ const Teams: React.FC = () => {
     };
   }, [socket, selectedProjectId]); 
 
-  // 🚀 [추가] 페이지 이탈(나가기) 시 그림 데이터 저장
+  // 페이지 이탈(나가기) 시 그림 데이터 저장
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (socketRef.current && selectedProjectId !== null) {
@@ -534,8 +525,8 @@ const Teams: React.FC = () => {
           console.log('Leaving page, saving drawings...');
           socketRef.current.emit('save-drawing-data', {
             pId: selectedProjectId,
-            canvasData: currentDrawings, // 🚀 획 배열(JSON)을 보냄
-            reason: 'button' // 'button'이 '나가기'를 의미
+            canvasData: currentDrawings,
+            reason: 'button' 
           });
         }
       }
@@ -688,7 +679,6 @@ const Teams: React.FC = () => {
               selectedProjectId={selectedProjectId}
             />
             
-            {/* 🚀 DrawingCanvas에 userId, drawings, setDrawings 전달 */}
             <DrawingCanvas
               socketRef={socketRef}
               selectedProjectId={selectedProjectId}

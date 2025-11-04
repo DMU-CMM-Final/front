@@ -183,25 +183,21 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
 
   // --- 실시간 드로잉 이벤트 리스너 ---
   
-  // [수정] 획 시작 (중복 확인 로직)
+  // 획 시작 (서버가 node ID를 포함해 보내줌)
   const onRemoteStartDrawing = useCallback((data: { stroke: DrawingStroke }) => {
     if (data.stroke.pId !== projectIdRef.current) return;
     
-    // [핵심] 
-    // 서버가 나에게도 획을 다시 보내주므로,
-    // 내가 낙관적 업데이트로 이미 추가한 획인지(node가 같은지) 확인합니다.
+    // 획이 이미 있는지 확인 (중복 방지)
     setDrawings(prev => {
-      const strokeExists = prev.some(s => s.node === data.stroke.node);
-      if (strokeExists) {
-        return prev; // 이미 있으면 추가하지 않음 (중복 방지)
-      }
-      return [...prev, data.stroke];
+        const strokeExists = prev.some(s => s.node === data.stroke.node);
+        if (strokeExists) return prev;
+        return [...prev, data.stroke];
     });
   }, [projectIdRef]); // drawings 의존성 제거
 
   // 획 이동 (다른 사람)
   const onRemoteDrawingEvent = useCallback((data: { node: string, x: number, y: number, uId: string, pId: number }) => {
-    // [핵심] 내가 그린 획(uId === userId)에 대한 이벤트는 무시.
+    // 내가 그린 획(uId === userId)에 대한 이벤트는 무시.
     if (data.uId === userId || data.pId !== projectIdRef.current) return;
     
     const newPoint = { x: data.x, y: data.y };

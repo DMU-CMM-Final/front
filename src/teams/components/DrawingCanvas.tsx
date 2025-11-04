@@ -1,8 +1,7 @@
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { Socket } from 'socket.io-client';
 import styled from 'styled-components';
-import { v4 as uuidv4 } from 'uuid'; // 🚀 [추가] uuid 임포트
-import { DrawingStroke, DrawingStrokePoint } from '../hooks/useObjectManager';
+import { DrawingStroke, DrawingStrokePoint } from './hooks/useObjectManager';
 
 interface DrawingCanvasProps {
   socketRef: React.RefObject<Socket | null>;
@@ -57,7 +56,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const localActiveStrokeNode = useRef<string | null>(null);
-  // 🚀 [삭제] isDrawing state (localActiveStrokeNode로 대체 가능)
+  const [isDrawing, setIsDrawing] = useState(false);
 
   // 1. 캔버스 초기 설정
   useLayoutEffect(() => {
@@ -95,7 +94,24 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     
   }, [drawings, selectedProjectId, drawingColor, penWidth, isEraserMode]);
 
-  // 🚀 [삭제] 3. '내 획 ID 수신 감지' useEffect (더 이상 필요 없음)
+  // 3. 서버로부터 내 획(node) ID 수신 감지
+  useEffect(() => {
+    // 마우스를 누르고 있고(isDrawing), 아직 서버로부터 획 ID(node)를 배정받지 못했을 때
+    if (isDrawing && localActiveStrokeNode.current === null) {
+      
+      // drawings 배열에서 방금 'remote-start-drawing'을 통해 추가된,
+      // '내(userId)'가 만든 '가장 최신 획'을 찾습니다.
+      const myNewStroke = drawings
+        .filter(s => s.uId === userId && s.pId === selectedProjectId)
+        .pop(); // pop()으로 가장 마지막에 추가된 획을 가져옴
+
+      if (myNewStroke) {
+        // 찾았다면, 이 획의 node ID를 '지금 내가 그리고 있는 획'으로 설정
+        localActiveStrokeNode.current = myNewStroke.node;
+        console.log("My new stroke node ID is set:", myNewStroke.node); // 👈 로그 추가
+      }
+    }
+  }, [drawings, isDrawing, userId, selectedProjectId]); // drawings 배열이 바뀔 때마다 체크
 
   // 4. 로컬 드로잉 이벤트 핸들러
   
@@ -104,44 +120,39 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     
     const { offsetX, offsetY } = event.nativeEvent;
     
-    // 🚀 [수정] 클라이언트에서 node ID 즉시 생성
-    const node = uuidv4();
+    setIsDrawing(true); // 마우스를 눌렀다고 표시
+    localActiveStrokeNode.current = null; // 서버로부터 node ID를 받을 준비
 
-    const newStroke: DrawingStroke = {
-      node,
+    // 'start-drawing': node 없이 툴 정보와 시작 좌표만 서버로 전송
+    socketRef.current?.emit('start-drawing', {
       pId: selectedProjectId,
       uId: userId,
       color: drawingColor,
       width: penWidth,
       isEraser: isEraserMode,
-      points: [{ x: offsetX, y: offsetY }]
-    };
-
-    localActiveStrokeNode.current = node; // 🚀 획 ID 즉시 설정
-    setDrawings(prev => [...prev, newStroke]); // 🚀 로컬 상태 즉시 업데이트
-    
-    // 'start-drawing': node가 포함된 획 객체 전송
-    socketRef.current?.emit('start-drawing', {
-      stroke: newStroke,
+      points: [{ x: offsetX, y: offsetY }] // 시작점
     });
   };
 
   const finishDrawing = () => {
-    // 🚀 [수정] 마우스를 떼면 획 ID 초기화
-    if (!localActiveStrokeNode.current) return; 
+    if (!isDrawing) return; 
     
     socketRef.current?.emit('finish-drawing', {
       pId: selectedProjectId,
     });
     
+    setIsDrawing(false); // 마우스를 뗐다고 표시
     localActiveStrokeNode.current = null; // 획 ID 초기화
   };
 
   const draw = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const activeNode = localActiveStrokeNode.current;
     
-    // 🚀 [수정] activeNode (획 ID)가 있어야만 그리기 실행
-    if (!isDrawingMode || !contextRef.current || !activeNode || !selectedProjectId) {
+    // 마우스를 누르고 있고(isDrawing), 서버로부터 획 ID(activeNode)를 배정받은 상태여야 함
+    if (!isDrawing || !isDrawingMode || !contextRef.current || !activeNode || !selectedProjectId) {
+      if(isDrawing && activeNode === null) {
+         console.log("Waiting for node ID from server..."); // 👈 로그 추가
+      }
       return; 
     }
 
@@ -157,7 +168,7 @@ const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
       )
     );
     
-    // 'drawing-event': 획 ID를 포함하여 좌표 전송
+    // 'drawing-event': 서버가 알려준 node ID를 포함하여 좌표 전송
     socketRef.current?.emit('drawing-event', {
       x: offsetX,
       y: offsetY,
