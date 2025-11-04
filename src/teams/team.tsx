@@ -1,16 +1,34 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import styled from 'styled-components';
-import Calendar from 'react-calendar';
-import Holidays from 'date-holidays';
-// import { useAuth } from '../contexts/AuthContext'; // 1. useAuth 제거
-import api from '../api'; // 캘린더 조회(fetchEvents)용
-import axios from 'axios'; // AI 서버 호출(handleAISubmit)용
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Socket } from 'socket.io-client';
+import Draggable from 'react-draggable';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  Container, SidebarContainer, SidebarToggle, ProjectHeader, Spacer,
+  ParticipantContainer, OverlapAvatarWrapper, UserAvatar, UserName, ProjectList,
+  ProjectItem, ProjectNameInput, ProjectActions, CreateProjectButton, MainArea, ProjectSelectPrompt,
+  PromptText, FloatingToolbar, ToolIcon, FloatingButtonWrap,
+  CreateMenu, CreateMenuButton, FloatingButton, ImageIcon, PenIcon, Cursor,
+  ExpandedUserList, UserListItem,
+  ToolbarLabel, ToolbarInput, ToolbarColorInput, ToolbarSelect,
+  COLOR
+} from './Team.styles';
+import { useSocketManager } from './hooks/useSocketManager';
+import { useWebRTC } from './hooks/useWebRTC';
+import { useObjectManager, DrawingStroke } from './hooks/useObjectManager'; // DrawingStroke 타입 임포트
+import TextBoxes from "./components/textBox";
+import VoteBoxes from "./components/voteBox";
+import ImageBoxes from "./components/ImageBox";
+import { VideoGrid } from './components/VideoGrid';
+import SummaryModal from './components/SummaryModal';
+import Calendar from './components/Calendar';
+import CalendarModal from './components/CalendarModal';
+import DrawingCanvas from './components/DrawingCanvas';
 
-// --- 타입 정의 ---
+// 캘린더 이벤트 타입
 interface CalendarEvent {
   eventId: number;
   tId: number | null;
-  tname?: string;
   title: string;
   description: string;
   startDate: Date;
@@ -18,783 +36,704 @@ interface CalendarEvent {
   isAllDay: boolean;
 }
 
-interface ChatMessage {
-  role: 'user' | 'ai' | 'system';
-  content: string;
+// 기타 타입 정의
+interface Project { pId: number; pName: string; createDate: string; }
+interface Participant { id: string; color: string; }
+interface TextBox {
+  node: string;
+  tId: string;
+  pId: number; uId: string; x: number; y: number;
+  width: number; height: number; text: string; color: string; font: string;
+  size: number; zIndex?: number; isOptimistic?: boolean;
 }
 
-// --- 스타일 정의 (변경 없음) ---
-const ModalOverlay = styled.div`
-  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-  background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 1100;
-`;
-const ModalContent = styled.div`
-  background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
-  display: flex; flex-direction: row; align-items: flex-start;
-`;
-const CalendarContainer = styled.div`
-  display: flex; flex-direction: column; align-items: center;
-`;
-const RightPanelContainer = styled.div`
-  width: 320px;
-  margin-left: 24px;
-  padding-left: 24px;
-  border-left: 1px solid #e0e0e0;
-  min-height: 520px;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-`;
-const EventDetailCard = styled.div`
-  margin-bottom: 15px; padding: 10px; border-radius: 8px; background-color: #f9f9f9; border: 1px solid #eee;
-  h4 { margin-top: 0; margin-bottom: 8px; font-size: 1.1rem; }
-  p { margin: 4px 0; font-size: 0.9rem; color: #555; white-space: pre-wrap; }
-`;
-const DetailsHeader = styled.h3`
-  font-size: 1.3rem; margin-top: 0; padding-bottom: 10px; border-bottom: 1px solid #eee;
-`;
-const CalendarWrapper = styled.div`
-  .react-calendar { width: 600px; border: none; font-size: 1.3rem; }
-  .react-calendar__navigation__label { font-size: 1.8rem; font-weight: bold; }
-  .react-calendar__month-view__weekdays__weekday abbr { font-size: 1.2rem; text-decoration: none; font-weight: 600; }
-  .react-calendar__tile { height: 70px; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 4px; overflow-y: hidden; }
-  .react-calendar__tile--now { background: #f0f0f0; font-weight: bold; border-radius: 8px; }
-  .react-calendar__tile--now:enabled:hover,
-  .react-calendar__tile--now:enabled:focus {
-    background: #f0f0f0;
+// UTC 시간 파싱 함수
+const parseUTCStringAsLocal = (dateString: string): Date => {
+  if (!dateString) return new Date();
+  const parts = dateString.split(/[^0-9]/).map(s => parseInt(s, 10));
+  return new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
+};
+
+// 유저 색상 생성 함수
+const generateColor = (id: string) => {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
-  button.react-calendar__tile--active,
-  button.react-calendar__tile--active:enabled:hover,
-  button.react-calendar__tile--active:enabled:focus {
-    background: none;
-    color: #000;
-    border: 2px solid #B8B6F2;
-    border-radius: 8px;
+  let color = '#';
+  for (let i = 0; i < 3; i++) {
+    const value = (hash >> (i * 8)) & 0xFF;
+    color += ('00' + value.toString(16)).substr(-2);
   }
-  .saturday { color: #007bff; }
-  .holiday abbr { color: #d93b3b; }
-`;
-const ButtonContainer = styled.div`
-  display: flex; justify-content: center; gap: 10px; width: 100%; margin-top: 20px;
-`;
-const ActionButton = styled.button`
-  padding: 8px 16px; border-radius: 5px; border: 1px solid #B8B6F2; background-color: #B8B6F2;
-  color: white; font-weight: bold; cursor: pointer; transition: background-color 0.2s ease;
-  &:hover { background-color: #a09ee0; }
-`;
-const CloseButton = styled.button`
-  padding: 8px 16px; border-radius: 5px; border: 1px solid #ccc; background-color: #f0f0f0;
-  cursor: pointer; transition: background-color 0.2s ease;
-  &:hover { background-color: #e0e0e0; }
-`;
-const EventHighlighter = styled.div<{ color: string; opacity: number }>`
-  background-color: ${(props) => `rgba(${parseInt(props.color.slice(1, 3), 16)}, ${parseInt(props.color.slice(3, 5), 16)}, ${parseInt(props.color.slice(5, 7), 16)}, ${props.opacity})`};
-  color: #111; padding: 0 4px; margin-bottom: 2px; border-radius: 3px; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
-`;
-const HolidayName = styled.div`
-  color: #d93b3b;
-  font-size: 0.8rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  width: 100%;
-`;
-const Form = styled.form` display: flex; flex-direction: column; gap: 15px; `;
-const FormGroup = styled.div`
-  display: flex; flex-direction: column; gap: 5px;
-  label { font-size: 0.9rem; font-weight: bold; }
-  input, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 1rem; }
-`;
-const FormRow = styled.div` display: flex; align-items: center; justify-content: space-between; `;
-const SwitchLabel = styled.label`
-  position: relative; display: inline-block; width: 44px; height: 24px;
-  input { opacity: 0; width: 0; height: 0; }
-`;
-const SwitchSlider = styled.span`
-  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px;
-  &:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
-`;
-const SwitchInput = styled.input`
-  &:checked + ${SwitchSlider} { background-color: #B8B6F2; }
-  &:checked + ${SwitchSlider}:before { transform: translateX(20px); }
-`;
-const DetailButtonContainer = styled.div`
-  display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;
-`;
-const DetailButton = styled.button`
-  padding: 4px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid #ccc;
-  background-color: #fff; cursor: pointer; &:hover { background-color: #f0f0f0; }
-`;
-const TeamEventNote = styled.p`
-  font-size: 0.8rem;
-  color: #888;
-  text-align: right;
-  margin: 10px 0 0 0;
-  padding-top: 10px;
-  border-top: 1px dashed #eee;
-`;
-const EmptyPanel = styled.div`
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  height: 100%; color: #888; text-align: center;
-`;
-const AddEventButton = styled(ActionButton)`
-  margin-top: 16px;
-`;
-const SearchContainer = styled.div`
-  padding: 10px; border-bottom: 1px solid #eee;
-`;
-const SearchInput = styled.input`
-  width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;
-  box-sizing: border-box;
-`;
-const TeamListContainer = styled.div`
-  max-height: 150px; overflow-y: auto; padding: 5px 0;
-`;
-const TeamButton = styled.button`
-  width: 100%; text-align: left; padding: 8px 12px;
-  border: none; background-color: transparent; cursor: pointer;
-  border-radius: 4px;
-  &:hover { background-color: #f0f0f0; }
-`;
-const FilterInfoContainer = styled.div`
-  padding: 10px; background-color: #f0f8ff; border-radius: 5px;
-  margin-bottom: 15px; font-size: 0.9rem;
-  display: flex; justify-content: space-between; align-items: center;
-`;
-const ClearFilterButton = styled.button`
-  background: none; border: none; color: #007bff; cursor: pointer;
-  text-decoration: underline; font-size: 0.9rem;
-`;
-const IconContainer = styled.div`
-  position: absolute; top: 0px; right: 0px; z-index: 10;
-  display: flex; gap: 8px; padding: 5px;
-`;
-const TopIcon = styled.div`
-  font-size: 1.5rem; cursor: pointer; padding: 5px; line-height: 1;
-  &:hover { opacity: 0.7; }
-`;
-const AIChatPanel = styled.div`
-  display: flex; flex-direction: column; height: 100%;
-  width: 100%;
-`;
-const AIMessageHistory = styled.div`
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 0;
-  display: flex; flex-direction: column; gap: 10px;
-  margin-top: 10px;
-`;
-const AIMessage = styled.div<{ role: 'user' | 'ai' | 'system' }>`
-  padding: 8px 12px;
-  border-radius: 18px;
-  max-width: 85%;
-  font-size: 0.9rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
+  return color;
+};
+
+const Teams: React.FC = () => {
+  const { userEmail } = useAuth();
+  const mainAreaRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
+  const navigate = useNavigate();
+  const location = useLocation();
   
-  background-color: ${props => 
-    props.role === 'user' ? '#B8B6F2' : (props.role === 'system' ? '#fffbe6' : '#f0f0f0')};
-  color: ${props => (props.role === 'user' ? 'white' : '#111')};
-  align-self: ${props => (props.role === 'user' ? 'flex-end' : 'flex-start')};
-  border: ${props => (props.role === 'system' ? '1px solid #ffe58f' : 'none')};
-`;
-const AITypingIndicator = styled.div`
-  font-style: italic; color: #888; font-size: 0.9rem;
-  padding: 10px 0;
-  align-self: flex-start;
-`;
-const AIChatForm = styled.form`
-  margin-top: auto;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
-  display: flex;
-  gap: 8px;
-`;
-const AIChatInput = styled.input`
-  flex: 1;
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  font-size: 0.9rem;
-`;
-const AIChatButton = styled(ActionButton)`
-  padding: 8px 12px;
-  height: 40px;
-`;
-
-// --- 헬퍼 함수 (변경 없음) ---
-interface Props { isOpen: boolean; onClose: () => void; }
-const toDateTimeLocalString = (date: Date) => {
-  const ten = (i: number) => (i < 10 ? '0' : '') + i;
-  return `${date.getFullYear()}-${ten(date.getMonth() + 1)}-${ten(date.getDate())}T${ten(date.getHours())}:${ten(date.getMinutes())}`;
-};
-const toDateInputString = (date: Date) => toDateTimeLocalString(date).slice(0, 10);
-const formatDateTimeForServer = (date: Date) => {
-    const pad = (num: number) => num.toString().padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-};
-const hslToHex = (h: number, s: number, l: number): string => {
-  s /= 100; l /= 100;
-  const k = (n: number) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
-  const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
-  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
-};
-const generateDeterministicColor = (id: number): string => {
-  const hue = (id * 37) % 360;
-  const saturation = 70;
-  const lightness = 65;
-  return hslToHex(hue, saturation, lightness);
-};
-const hd = new Holidays('KR');
-const ChatHistoryRef = React.createRef<HTMLDivElement>();
+  const { userId, teamId } = location.state || {};
+  // const userId = "dg0319@naver.com"; // 테스트용
+  // const teamId = "1"; // 테스트용
 
 
-const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  // --- (수정) localStorage에서 직접 가져오기 ---
-  const userEmail = localStorage.getItem("userEmail"); 
+  // --- 상태 관리 ---
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
 
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [activeDate, setActiveDate] = useState(new Date());
-  const [loading, setLoading] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [isAddingEvent, setIsAddingEvent] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilterTName, setActiveFilterTName] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'calendar' | 'ai' | 'search'>('calendar');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: 'system', content: '안녕하세요! AI-Cal 비서입니다. \n"내일 3시 30분 팀 미팅"처럼 말씀해주시면 일정을 추가해 드립니다.' }
-  ]);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [isAILoading, setIsAILoading] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState<string>('');
   
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [isUserListExpanded, setIsUserListExpanded] = useState(false);
+
+  // 모드 관리
+  const [isTextMode, setIsTextMode] = useState(false);
+  const [isVoteCreateMode, setIsVoteCreateMode] = useState(false);
+  const [isDrawingMode, setIsDrawingMode] = useState(false); 
+  
+  // 그리기 도구 상태
+  const [drawingColor, setDrawingColor] = useState('#000000');
+  const [penWidth, setPenWidth] = useState(3);
+  const [isEraserMode, setIsEraserMode] = useState(false);
+  
+  // 포커스 상태
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const [focusedVoteIdx, setFocusedVoteIdx] = useState<number | null>(null);
+  const [focusedImageIdx, setFocusedImageIdx] = useState<number | null>(null);
+
+  // 모달 상태
+  const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+  const [summaryContent, setSummaryContent] = useState('');
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  
+  // 캘린더 상태
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [showAllEvents, setShowAllEvents] = useState(false);
+
+  // --- 훅 초기화 ---
+  const { socket } = useSocketManager(String(teamId), userId);
+  const socketRef = useRef<Socket | null>(null);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+
+  const { inCall, localStream, remoteStreams, cursors, handleStartCall, handleEndCall, broadcastCursorPosition } = useWebRTC(socket, String(teamId), userId, participants);
+  
+  const { textBoxes, setTextBoxes, voteBoxes, setVoteBoxes, imageBoxes, setImageBoxes, drawings, setDrawings } = useObjectManager(socket, userId, selectedProjectId);
+  
+  const drawingsRef = useRef(drawings);
   useEffect(() => {
-    if (ChatHistoryRef.current) {
-      ChatHistoryRef.current.scrollTop = ChatHistoryRef.current.scrollHeight;
-    }
-  }, [chatMessages]);
+    drawingsRef.current = drawings;
+  }, [drawings]);
 
-  const [newEvent, setNewEvent] = useState({
-    title: '', description: '', startDate: new Date(),
-    endDate: new Date(Date.now() + 60 * 60 * 1000), isAllDay: false
-  });
+  const otherParticipants = participants.filter(p => p.id !== userId);
+  const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
 
-    useEffect(() => {
-        if (isOpen) {
-            document.body.style.overflow = 'hidden';
-        }
-        return () => {
-            document.body.style.overflow = 'unset';
-        };
-    }, [isOpen]);
+  // --- 이벤트 핸들러 ---
+  const handleToggleDrawingMode = () => {
+    setIsDrawingMode(prev => !prev);
+    setIsTextMode(false);
+    setIsVoteCreateMode(false);
+    setIsEraserMode(false);
+  };
 
-  const getColorForTId = useCallback((tId: number | null): string => {
-    if (!tId) {
-      return '#B8B6F2';
-    }
-    return generateDeterministicColor(tId);
+  // ESC 키 이벤트 리스너
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsTextMode(false);
+        setIsVoteCreateMode(false);
+        setIsDrawingMode(false);
+        setIsEraserMode(false); 
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
-  const fetchEvents = useCallback(async (date: Date) => {
-    if (!userEmail) return;
-    setLoading(true);
-    
-    const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-    try {
-      // (변경 없음) api 인스턴스는 자동으로 토큰을 첨부합니다.
-      const response = await api.get<any[]>('/spring/calendar', {
-        params: {
-          uId: userEmail,
-          date: dateParam
-        }
-      });
-      const data: any[] = response.data;
-      console.log("Fetched raw calendar data from API:", data);
-      const processedEvents: CalendarEvent[] = data.map((event: any) => ({
-        ...event,
-        tId: event.tid,
-        tname: event.tname,
-        startDate: new Date(event.startDate),
-        endDate: new Date(event.endDate),
-      }));
-      setEvents(processedEvents);
-    } catch (error) { 
-      console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); 
-      if (error && typeof error === 'object' && 'response' in error) {
-        const responseData = (error as any).response?.data;
-        alert(responseData?.message || "캘린더 데이터 로딩에 실패했습니다.");
-      } else {
-        alert('캘린더 데이터를 가져오는 데 실패했습니다.');
-      }
-    }
-    finally { setLoading(false); }
-  }, [userEmail]); // userEmail이 변경될 때만 함수 재생성
-
+  // 캘린더 실시간 이벤트 리스너
   useEffect(() => {
-    if (isOpen && userEmail) { // userEmail이 있을 때만 fetch
-      fetchEvents(activeDate); 
-    } else if (!isOpen) {
-      setSelectedDate(null);
-      setIsAddingEvent(false);
-      setEditingEvent(null);
-      setSearchTerm('');
-      setActiveFilterTName(null);
-      setAiPrompt('');
-      setIsAILoading(false);
-      setViewMode('calendar'); 
-      setChatMessages([ 
-        { role: 'system', content: '안녕하세요! AI-Cal 비서입니다. \n"내일 3시 30분 팀 미팅"처럼 말씀해주시면 일정을 추가해 드립니다.' }
-      ]);
-    }
-  }, [isOpen, activeDate, fetchEvents, userEmail]); // userEmail 의존성 추가
+    if (!socket || !teamId || !userEmail) return;
 
-  // --- 기존 일정 추가/수정/삭제 핸들러 (변경 없음) ---
-  const handleShowAddForm = () => {
-    setViewMode('calendar'); 
-    setIsAddingEvent(true);
-    const baseDate = selectedDate ? new Date(selectedDate) : new Date();
-    const currentTime = new Date();
-    baseDate.setHours(currentTime.getHours(), currentTime.getMinutes());
-    setNewEvent({
-        title: '',
-        description: '',
-        startDate: baseDate,
-        endDate: new Date(baseDate.getTime() + 60 * 60 * 1000),
-        isAllDay: false,
+    const handleCalendarEventNew = (newEventData: any) => {
+      console.log('새 일정 수신:', newEventData);
+      const processedNewEvent: CalendarEvent = {
+        ...newEventData,
+        tId: newEventData.tId !== undefined ? newEventData.tId : null,
+        startDate: parseUTCStringAsLocal(newEventData.startDate),
+        endDate: parseUTCStringAsLocal(newEventData.endDate)
+      };
+      setCalendarEvents(prev => [...prev, processedNewEvent]);
+    };
+    const handleCalendarEventUpdated = (updatedEventData: any) => {
+       console.log('수정된 일정 수신:', updatedEventData);
+       const processedUpdatedEvent: CalendarEvent = {
+         ...updatedEventData,
+         tId: updatedEventData.tId !== undefined ? updatedEventData.tId : null,
+         startDate: parseUTCStringAsLocal(updatedEventData.startDate),
+         endDate: parseUTCStringAsLocal(updatedEventData.endDate)
+       };
+       setCalendarEvents(prev => prev.map(event =>
+         event.eventId === processedUpdatedEvent.eventId ? processedUpdatedEvent : event
+       ));
+    };
+    const handleCalendarEventDeleted = (deletedEventData: { eventId: number }) => {
+      console.log('삭제된 일정 수신:', deletedEventData);
+      setCalendarEvents(prev => prev.filter(event => event.eventId !== deletedEventData.eventId));
+    };
+
+    socket.on('calendar-event-new', handleCalendarEventNew);
+    socket.on('calendar-event-updated', handleCalendarEventUpdated);
+    socket.on('calendar-event-deleted', handleCalendarEventDeleted);
+
+    return () => {
+      socket.off('calendar-event-new', handleCalendarEventNew);
+      socket.off('calendar-event-updated', handleCalendarEventUpdated);
+      socket.off('calendar-event-deleted', handleCalendarEventDeleted);
+    };
+  }, [socket, teamId, userEmail]);
+
+  // 캘린더 초기 로드 및 월 변경 리스너
+  useEffect(() => {
+    if (!socket || !teamId || !userEmail) {
+       setCalendarEvents([]);
+       return;
+    }
+    const fetchCalendarEvents = (date: Date) => {
+      const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+      if (showAllEvents) {
+        socket.emit('calendar-all', { uId: userEmail, date: dateParam });
+      } else {
+        socket.emit('calendar-init', { tId: teamId, date: dateParam });
+      }
+    };
+    fetchCalendarEvents(calendarDate);
+
+    const handleGenericCalendarData = (data: any) => {
+      let eventList: any[] = [];
+      let responseTid: number | null = null;
+      if (data && !Array.isArray(data) && data.events) {
+        eventList = data.events;
+        responseTid = data.tId || null;
+      } else if (Array.isArray(data) && data.length > 0 && data[0]?.events) {
+        const payload = data[0];
+        eventList = Array.isArray(payload.events) ? payload.events : [];
+        responseTid = payload.tId || null;
+      } else if (Array.isArray(data)) {
+        eventList = data;
+      }
+      const processedEvents: CalendarEvent[] = eventList.map((event: any) => ({
+        ...event,
+        tId: event.tId !== undefined ? event.tId : responseTid,
+        startDate: parseUTCStringAsLocal(event.startDate),
+        endDate: parseUTCStringAsLocal(event.endDate)
+      }));
+      setCalendarEvents(processedEvents);
+    };
+
+    socket.on('calendar-data', handleGenericCalendarData);
+    socket.on('calendar-all-data', handleGenericCalendarData);
+
+    return () => {
+      socket.off('calendar-data', handleGenericCalendarData);
+      socket.off('calendar-all-data', handleGenericCalendarData);
+    };
+  }, [calendarDate, showAllEvents, socket, teamId, userEmail]);
+
+  // 텍스트 상자 속성 변경 핸들러
+  const handleAttributeChange = (attribute: 'size' | 'color' | 'font', value: any) => {
+    setTextBoxes(prev => {
+      const boxToUpdate = prev[focusedIdx!];
+      if (boxToUpdate && boxToUpdate.node && !boxToUpdate.node.startsWith('optimistic-') && selectedProjectId) {
+        socketRef.current?.emit("textEvent", {
+          fnc: "update",
+          node: boxToUpdate.node,
+          type: "text",
+          pId: selectedProjectId,
+          ...(attribute === 'size' && { cSize: Number(value) }),
+          ...(attribute === 'color' && { cColor: value }),
+          ...(attribute === 'font' && { cFont: value }),
+        });
+      }
+      return prev.map((box, index) =>
+        index === focusedIdx ? { ...box, [attribute]: value } : box
+      );
     });
   };
-  const handleNewEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value, type } = e.target;
-    const isCheckbox = type === 'checkbox';
-    setNewEvent(prev => ({ ...prev, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) }));
-  };
-  const handleSaveEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEvent.title) { alert("제목을 입력해주세요."); return; }
-    let finalStartDate: string;
-    let finalEndDate: string;
-    if (newEvent.isAllDay) {
-        const startOfDay = new Date(newEvent.startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        finalStartDate = formatDateTimeForServer(startOfDay);
-        const endOfDay = new Date(newEvent.endDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        finalEndDate = formatDateTimeForServer(endOfDay);
-    } else {
-        finalStartDate = formatDateTimeForServer(newEvent.startDate);
-        finalEndDate = formatDateTimeForServer(newEvent.endDate);
+
+  // 잘못된 접근 방지
+  useEffect(() => {
+    if (!userId || !teamId) {
+      alert("잘못된 접근입니다. 프로젝트 목록으로 돌아갑니다.");
+      navigate('/projects');
     }
-    const payload = {
-        uId: userEmail, // localStorage에서 가져온 userEmail 사용
-        title: newEvent.title,
-        description: newEvent.description,
-        isAllDay: newEvent.isAllDay,
-        startDate: finalStartDate,
-        endDate: finalEndDate,
+  }, [userId, teamId, navigate]);
+
+  // 커서 위치 브로드캐스트
+  useEffect(() => {
+    const area = mainAreaRef.current;
+    if (!area) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = area.getBoundingClientRect();
+      if (
+        e.clientX >= rect.left && e.clientX <= rect.right &&
+        e.clientY >= rect.top && e.clientY <= rect.bottom
+      ) {
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        broadcastCursorPosition(x, y);
+      }
     };
-    try {
-        await api.post('/spring/calendar/new', payload);
-        setIsAddingEvent(false);
-        await fetchEvents(activeDate);
-    } catch (error) { 
-      console.error(error); alert(String(error)); 
-      if (error && typeof error === 'object' && 'response' in error) {
-        const responseData = (error as any).response?.data;
-        alert(responseData?.message || "일정 저장에 실패했습니다.");
-      } else {
-        alert(String(error)); 
-      }
-    }
-  };
-  const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    if (!editingEvent) return;
-    const { name, value, type } = e.target;
-    const isCheckbox = type === 'checkbox';
-    setEditingEvent({ ...editingEvent, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) });
-  };
-  const handleUpdateEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingEvent) { alert("수정할 일정이 없습니다."); return; }
-    let finalStartDate: string;
-    let finalEndDate: string;
-    if (editingEvent.isAllDay) {
-        const startOfDay = new Date(editingEvent.startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        finalStartDate = formatDateTimeForServer(startOfDay);
-        const endOfDay = new Date(editingEvent.endDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        finalEndDate = formatDateTimeForServer(endOfDay);
-    } else {
-        finalStartDate = formatDateTimeForServer(editingEvent.startDate);
-        finalEndDate = formatDateTimeForServer(editingEvent.endDate);
-    }
-    const payload = {
-      eventId: editingEvent.eventId,
-      uId: userEmail, // localStorage에서 가져온 userEmail 사용
-      title: editingEvent.title,
-      description: editingEvent.description,
-      isAllDay: editingEvent.isAllDay,
-      startDate: finalStartDate,
-      endDate: finalEndDate,
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
     };
-    try {
-      await api.post('/spring/calendar/update', payload);
-      setEditingEvent(null);
-      await fetchEvents(activeDate);
-    } catch (error) { 
-      console.error(error); alert(String(error)); 
-      if (error && typeof error === 'object' && 'response' in error) {
-        const responseData = (error as any).response?.data;
-        alert(responseData?.message || "일정 수정에 실패했습니다.");
-      } else {
-        alert(String(error)); 
-      }
-    }
-  };
-  const handleDeleteEvent = async (eventId: number) => {
-    if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
-    try {
-      await api.get('/spring/calendar/delete', { 
-        params: { id: eventId } 
-      });
-      setSelectedDate(null);
-      await fetchEvents(activeDate);
-    } catch (error) { 
-      console.error(error); alert(String(error)); 
-      if (error && typeof error === 'object' && 'response' in error) {
-        const responseData = (error as any).response?.data;
-        alert(responseData?.message || "일정 삭제에 실패했습니다.");
-      } else {
-        alert(String(error)); 
-      }
-    }
-  };
+  }, [broadcastCursorPosition]);
 
-  const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => { if (activeStartDate) setActiveDate(activeStartDate); };
+  // 방 정보, 유저 입장/퇴장, 요약 결과 리스너
+  useEffect(() => {
+    if (!socket) return;
+    const handleRoomInfo = (data: { users?: string[], projects?: Project[] }) => {
+        if (data.users) {
+            const allUsers = [...new Set([...data.users, userId])];
+            setParticipants(allUsers.map(id => ({ id, color: generateColor(id) })));
+        }
+        if (data.projects) {
+            setProjects(data.projects);
+        }
+    };
+    const handleUserJoined = ({ userId: joinedUserId }: { userId: string }) => {
+        setParticipants(prev => {
+            if (prev.find(p => p.id === joinedUserId)) return prev;
+            return [...prev, { id: joinedUserId, color: generateColor(joinedUserId) }];
+        });
+    };
+    const handleUserLeft = ({ userId: leftUserId }: { userId: string }) => {
+      setParticipants(prev => prev.filter(p => p.id !== leftUserId));
+    };
+    const handleSummaryResult = ({ summary }: { summary: string }) => {
+      setSummaryContent(summary);
+      setIsSummaryLoading(false);
+    };
+    socket.on('room-info', handleRoomInfo);
+    socket.on('user-joined', handleUserJoined);
+    socket.on('user-left', handleUserLeft);
+    socket.on('summarize-result', handleSummaryResult);
+    return () => {
+      socket.off('room-info', handleRoomInfo);
+      socket.off('user-joined', handleUserJoined);
+      socket.off('user-left', handleUserLeft);
+      socket.off('summarize-result', handleSummaryResult);
+    };
+  }, [socket, userId, teamId]);
+
+  // 프로젝트 생성/수정/삭제 리스너
+  useEffect(() => {
+    if (!socket) return;
+    socket.on('project-added', (newProject: Project) => setProjects(prev => [...prev, newProject]));
+    socket.on('project-renamed', ({ pId, newName }) => {
+        setProjects(prev => prev.map(p => p.pId === pId ? { ...p, pName: newName } : p))
+        if(pId === editingProjectId) {
+            handleCancelEditing();
+        }
+    });
+    socket.on('project-deleted', ({ pId }) => {
+        setProjects(prev => prev.filter(p => p.pId !== pId));
+        if (selectedProjectId === pId) setSelectedProjectId(null);
+    });
+    return () => {
+      socket.off('project-added');
+      socket.off('project-renamed');
+      socket.off('project-deleted');
+    };
+  }, [socket, selectedProjectId, editingProjectId]);
   
-  const handleDateClick = (date: Date) => {
-    setSelectedDate(date);
-    setViewMode('calendar'); 
-    setIsAddingEvent(false);
-    setEditingEvent(null);
-  };
-  
-  const handleChangeViewMode = (mode: 'calendar' | 'ai' | 'search') => {
-    setViewMode(mode);
-    setSelectedDate(null);
-    setIsAddingEvent(false);
-    setEditingEvent(null);
-    setSearchTerm('');
-  };
-
-  // --- (최종 수정) AI 프롬프트 제출 핸들러 ---
-  const handleAISubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const promptText = aiPrompt.trim();
-
-    // 2. localStorage에서 토큰(accessToken)과 이메일(userEmail)을 직접 가져옵니다
-    const token = localStorage.getItem("accessToken"); 
-    const email = localStorage.getItem("userEmail"); // userEmail은 이미 컴포넌트 상단에 있음
-
-    // 3. userEmail과 token 존재 여부 확인
-    if (!promptText || !email || !token) {
-      alert("AI 비서 사용을 위해 로그인이 필요합니다.");
+  // AI 요약 요청
+  const handleSummaryRequest = () => {
+    if (!socket || !selectedProjectId) {
+      alert("프로젝트를 먼저 선택해주세요.");
       return;
     }
-
-    setIsAILoading(true);
-    setAiPrompt(''); 
-    setChatMessages(prev => [...prev, { role: 'user', content: promptText }]);
-
-    const currentDate = new Date().toISOString();
-    
-    // 4. payload에 userEmail과 accessToken을 포함
-    const payload = {
-        uId: email, // localStorage에서 가져온 이메일
-        prompt: promptText,
-        currentDate: currentDate,
-        accessToken: token // localStorage에서 가져온 토큰
-    };
-
-    try {
-        // (중요) 이 URL을 EC2의 Public IP로 변경하세요
-        const response = await axios.post('http://3.87.230.137:8001/ai/process', payload);
-        
-        const { message, tool_used } = response.data;
-        
-        setChatMessages(prev => [...prev, { role: 'ai', content: message }]);
-        
-        if (tool_used) {
-            console.log("AI가 도구를 사용하여 캘린더를 새로고침합니다.");
-            await fetchEvents(activeDate);
-        }
-
-    } catch (error: any) {
-        console.error("AI 프록시 서버(EC2) 호출에 실패했습니다:", error);
-        let errorMessage = "AI 서버(EC2)와 통신 중 오류가 발생했습니다. (방화벽 8001 포트 확인)";
-        if (error.response && error.response.data && error.response.data.message) {
-            errorMessage = error.response.data.message;
-        } else if (error.message) {
-            errorMessage = error.message;
-        }
-        setChatMessages(prev => [...prev, { role: 'ai', content: `오류: ${errorMessage}` }]);
-    } finally {
-        setIsAILoading(false);
-    }
+    setIsSummaryLoading(true);
+    setSummaryContent('');
+    setIsSummaryModalOpen(true);
+    setShowCreateMenu(false);
+    socket.emit('summarize-request', { pId: selectedProjectId });
   };
 
-  // --- (변경 없음) ---
-  const filteredEvents = useMemo(() => {
-    if (!activeFilterTName) {
-      return events;
-    }
-    return events.filter(event => event.tname === activeFilterTName);
-  }, [events, activeFilterTName]);
-
-  const allTeamNames = useMemo(() => {
-    const teamNames = new Set<string>();
-    events.forEach(event => { if (event.tname) { teamNames.add(event.tname); } });
-    return Array.from(teamNames).sort();
-  }, [events]);
-
-  const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
-      if (view !== 'month') return null;
-      const holidayInfo = hd.isHoliday(date);
-      const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
-      const dayEvents = filteredEvents.filter(event => {
-          const dayStart = new Date(date);
-          dayStart.setHours(0, 0, 0, 0);
-          const dayEnd = new Date(date);
-          dayEnd.setHours(23, 59, 59, 999);
-          return event.startDate <= dayEnd && event.endDate >= dayStart;
-      });
-      const maxEventsToShow = isPublicHoliday ? 1 : 2;
-      return (
-          <>
-              {isPublicHoliday && (<HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>)}
-              {dayEvents.slice(0, maxEventsToShow).map(event => (
-                  <EventHighlighter
-                      key={event.eventId}
-                      color={getColorForTId(event.tId)}
-                      opacity={event.isAllDay ? 1 : 0.5}
-                      title={event.title}
-                  >
-                      {event.title}
-                  </EventHighlighter>
-              ))}
-          </>
-      );
+  // --- 프로젝트 이름 수정 관련 핸들러 ---
+  const handleStartEditing = (project: Project) => {
+    setEditingProjectId(project.pId);
+    setEditingProjectName(project.pName);
   };
-
-  const selectedDayEvents = selectedDate ? filteredEvents.filter(event => {
-      const dayStart = new Date(selectedDate);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(selectedDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      return event.startDate <= dayEnd && event.endDate >= dayStart;
-  }) : [];
-
-  // --- (변경 없음) renderRightPanelContent ---
-  const renderRightPanelContent = () => {
-    
-    if (viewMode === 'ai') {
-      return (
-        <AIChatPanel>
-          <DetailsHeader>AI 비서 🤖</DetailsHeader>
-          <AIMessageHistory ref={ChatHistoryRef}>
-            {chatMessages.map((msg, index) => (
-              <AIMessage key={index} role={msg.role}>{msg.content}</AIMessage>
-            ))}
-            {isAILoading && <AITypingIndicator>AI가 생각 중입니다...</AITypingIndicator>}
-          </AIMessageHistory>
-          <AIChatForm onSubmit={handleAISubmit}>
-            <AIChatInput 
-              type="text" 
-              placeholder="예: 내일 3시 30분 팀 미팅"
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              disabled={isAILoading}
-            />
-            <AIChatButton type="submit" disabled={isAILoading}>
-              {isAILoading ? '...' : '전송'}
-            </AIChatButton>
-          </AIChatForm>
-        </AIChatPanel>
-      );
+  const handleSubmitRename = () => {
+    if (!editingProjectId) return;
+    const originalProject = projects.find(p => p.pId === editingProjectId);
+    const newName = editingProjectName.trim();
+    if (newName && originalProject && originalProject.pName !== newName) {
+      socket?.emit('project-rename', { pId: editingProjectId, newName: newName });
+    } else {
+        handleCancelEditing();
     }
-
-    if (viewMode === 'search') {
-      return (
-          <>
-              <DetailsHeader>팀 일정 필터</DetailsHeader>
-              <SearchContainer>
-                  <SearchInput
-                      type="text"
-                      placeholder="보고싶은 팀 일정을 입력해주세요."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-              </SearchContainer>
-              <TeamListContainer>
-                  {allTeamNames
-                      .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map(name => (
-                          <TeamButton key={name} onClick={() => {
-                              setActiveFilterTName(name);
-                              setViewMode('calendar'); 
-                          }}>
-                              {name}
-                          </TeamButton>
-                      ))}
-              </TeamListContainer>
-          </>
-      );
+  };
+  const handleCancelEditing = () => {
+    setEditingProjectId(null);
+    setEditingProjectName('');
+  };
+  const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const isButtonRelated = e.relatedTarget === confirmBtnRef.current || e.relatedTarget === cancelBtnRef.current;
+    if (!isButtonRelated) {
+      handleCancelEditing();
     }
-    
-    if (isAddingEvent || editingEvent) {
-      const isEditMode = !!editingEvent;
-      const currentEventData = isEditMode ? editingEvent : newEvent;
-      const handleChange = isEditMode ? handleEditEventChange : handleNewEventChange;
-      const handleSubmit = isEditMode ? handleUpdateEvent : handleSaveEvent;
-      const handleCancel = () => {
-        setIsAddingEvent(false);
-        setEditingEvent(null);
+  };
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSubmitRename();
+    } else if (e.key === 'Escape') {
+      handleCancelEditing();
+    }
+  };
+  // ---
+
+  // 프로젝트 선택
+  const handleSelectProject = useCallback((pId: number) => {
+    if (selectedProjectId === pId) return;
+    setEditingProjectId(null); 
+    setSelectedProjectId(pId);
+    socket?.emit('join-project', { pId });
+  }, [socket, selectedProjectId]);
+
+  // 프로젝트 생성
+  const handleCreateProject = useCallback(() => {
+    const name = prompt("새 프로젝트의 이름을 입력하세요:");
+    if (name && name.trim()) {
+      socket?.emit('project-create', { name: name.trim() });
+    }
+  }, [socket]);
+
+  // 프로젝트 삭제
+  const handleDeleteProject = useCallback((pId: number) => {
+    const currentProject = projects.find(p => p.pId === pId);
+    if (window.confirm(`'${currentProject?.pName}' 프로젝트를 정말로 삭제하시겠습니까?`)) {
+      socket?.emit('project-delete', { pId });
+    }
+  }, [socket, projects]);
+
+  // Z-Index 계산
+  const getMaxZIndex = () => {
+    const textMax = textBoxes.length > 0 ? Math.max(0, ...textBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
+    const voteMax = voteBoxes.length > 0 ? Math.max(0, ...voteBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
+    const imageMax = imageBoxes.length > 0 ? Math.max(0, ...imageBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
+    return Math.max(textMax, voteMax, imageMax);
+  };
+  
+  // 메인 영역 클릭 (텍스트/투표 상자 생성)
+  const handleMainAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === mainAreaRef.current) {
+      setFocusedIdx(null);
+      setFocusedImageIdx(null);
+      setFocusedVoteIdx(null);
+    }
+    if (!mainAreaRef.current || !socket || !selectedProjectId) return;
+    if (isDrawingMode) return;
+    if (!isTextMode && !isVoteCreateMode) return;
+    if (e.target !== mainAreaRef.current) return;
+    const rect = mainAreaRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (isTextMode) {
+      setIsTextMode(false);
+      const tempNodeId = `optimistic-${Date.now()}`;
+      const optimisticBox: TextBox = {
+          node: tempNodeId,
+          tId: String(teamId),
+          pId: selectedProjectId, uId: userId,
+          x, y, width: 200, height: 40, text: "", color: "#000000", font: "Arial", size: 16,
+          isOptimistic: true
       };
-      return (
-        <>
-            <DetailsHeader>{isEditMode ? '일정 수정' : '새 일정 추가'}</DetailsHeader>
-            <Form onSubmit={handleSubmit}>
-                <FormGroup><label htmlFor="title">제목</label><input type="text" name="title" id="title" value={currentEventData.title} onChange={handleChange} required /></FormGroup>
-                <FormGroup><FormRow><label>하루 종일</label><SwitchLabel><SwitchInput type="checkbox" name="isAllDay" checked={currentEventData.isAllDay} onChange={handleChange} /><SwitchSlider /></SwitchLabel></FormRow></FormGroup>
-                <FormGroup>
-                    <label htmlFor="startDate">시작</label>
-                    <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="startDate" id="startDate"
-                        value={currentEventData.isAllDay ? toDateInputString(currentEventData.startDate) : toDateTimeLocalString(currentEventData.startDate)}
-                        onChange={handleChange} />
-                </FormGroup>
-                <FormGroup>
-                    <label htmlFor="endDate">종료</label>
-                    <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="endDate" id="endDate"
-                        value={currentEventData.isAllDay ? toDateInputString(currentEventData.endDate) : toDateTimeLocalString(currentEventData.endDate)}
-                        onChange={handleChange} />
-                </FormGroup>
-                <FormGroup><label htmlFor="description">상세 설명</label><textarea name="description" id="description" rows={4} value={currentEventData.description} onChange={handleChange}></textarea></FormGroup>
-                <ButtonContainer style={{ marginTop: 'auto' }}>
-                    <ActionButton type="submit">저장</ActionButton>
-                    <CloseButton type="button" onClick={handleCancel}>취소</CloseButton>
-                </ButtonContainer>
-            </Form>
-        </>
-      );
+      setTextBoxes(prev => [...prev, optimisticBox]);
+      setFocusedIdx(textBoxes.length);
+      socket.emit("textEvent", { 
+          fnc: "new", type: "text", pId: selectedProjectId, 
+          cLocate: { x, y }, cScale: { width: 200, height: 40 }, 
+          cContent: "", cFont: "Arial", cColor: "#000000", cSize: 16,
+          tempNodeId: tempNodeId
+      });
+    } else if (isVoteCreateMode) {
+      setIsVoteCreateMode(false);
+      socket.emit("voteEvent", { 
+        fnc: "new", type: "vote", pId: selectedProjectId, 
+        cLocate: { x, y }, cScale: { width: 300, height: 200 }, 
+        cTitle: "새 투표", cList: [{ content: "" }, { content: "" }] 
+      });
     }
-
-    if (selectedDate) {
-      return (
-        <>
-          {activeFilterTName && (
-              <FilterInfoContainer>
-                  <span><strong>{activeFilterTName}</strong> 일정만 보는 중</span>
-                  <ClearFilterButton onClick={() => setActiveFilterTName(null)}>필터링 끄기</ClearFilterButton>
-              </FilterInfoContainer>
-          )}
-          <DetailsHeader>{selectedDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</DetailsHeader>
-          {selectedDayEvents.length > 0 ? (
-            selectedDayEvents.map(event => (
-              <EventDetailCard key={event.eventId}>
-                <h4>{event.title} {event.tname && `(${event.tname})`}</h4>
-                <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} ~ ${event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}</p>
-                <p><strong>상세:</strong><br />{event.description}</p>
-                {event.tId === null ? (
-                  <DetailButtonContainer>
-                      <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
-                      <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
-                  </DetailButtonContainer>
-                ) : (
-                  <TeamEventNote>팀 일정은 이 곳에서 수정/삭제할 수 없습니다.</TeamEventNote>
-                )}
-              </EventDetailCard>
-            ))
-          ) : (
-            <EmptyPanel style={{ justifyContent: 'flex-start', paddingTop: '20px' }}>
-                <p>등록된 일정이 없습니다.</p>
-                <AddEventButton onClick={handleShowAddForm}>새 일정 추가</AddEventButton>
-            </EmptyPanel>
-          )}
-        </>
-      );
+  };
+  
+  // 이미지 파일 업로드
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedProjectId) return;
+    const formData = new FormData();
+    formData.append("image", file);
+    formData.append("tId", String(teamId));
+    formData.append("pId", String(selectedProjectId));
+    formData.append("uId", userId);
+    formData.append("cLocate", JSON.stringify({ x: 100, y: 100 }));
+    formData.append("cScale", JSON.stringify({ width: 200, height: 200 }));
+    try {
+      await fetch(`https://blanksync.o-r.kr/node/api/image/upload`, { method: "POST", body: formData });
+    } catch (err) {
+      console.error(err);
     }
-    
-    return (
-      <>
-        {activeFilterTName && (
-            <FilterInfoContainer>
-              <span><strong>{activeFilterTName}</strong> 일정만 보는 중</span>
-              <ClearFilterButton onClick={() => setActiveFilterTName(null)}>필터링 끄기</ClearFilterButton>
-            </FilterInfoContainer>
-        )}
-        <EmptyPanel>
-          <p style={{ fontSize: '1.2rem', marginBottom: '10px' }}>🗓️</p>
-          <p>날짜를 선택하여<br/>일정을 확인하거나<br/>새 일정을 추가하세요.</p>
-        </EmptyPanel>
-      </>
-    );
   };
 
-  if (!isOpen) return null;
+  // 서버의 그림 데이터 저장 요청 리스너
+  useEffect(() => {
+    if (!socket || !selectedProjectId) return;
+    const handleRequestDrawingData = (data: { reason: string }) => {
+      console.log(`Server requested drawing data (reason: ${data.reason})`);
+      socket.emit('save-drawing-data', {
+        pId: selectedProjectId,
+        canvasData: drawingsRef.current.filter(s => s.pId === selectedProjectId),
+        reason: data.reason
+      });
+    };
+    socket.on('request-drawing-data', handleRequestDrawingData);
+    return () => {
+      socket.off('request-drawing-data', handleRequestDrawingData);
+    };
+  }, [socket, selectedProjectId]); 
 
+  // 페이지 이탈(나가기) 시 그림 데이터 저장
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (socketRef.current && selectedProjectId !== null) {
+        const currentDrawings = drawingsRef.current.filter(s => s.pId === selectedProjectId);
+        if (currentDrawings.length > 0) {
+          console.log('Leaving page, saving drawings...');
+          socketRef.current.emit('save-drawing-data', {
+            pId: selectedProjectId,
+            canvasData: currentDrawings,
+            reason: 'button' 
+          });
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [socketRef, selectedProjectId]);
+  
+  // --- 렌더링 ---
+  if (!userId || !teamId) {
+    return <div>프로젝트 정보를 불러오는 중...</div>;
+  }
+  
   return (
-    <ModalOverlay onClick={onClose}>
-      <ModalContent onClick={(e) => e.stopPropagation()}>
-        <CalendarContainer>
-          <CalendarWrapper>
-            {loading && <div style={{ position: 'absolute', zIndex: 1, top: '50%', left: '50%', transform: 'translate(-50%, -50%)'}}>로딩 중...</div>}
-            <Calendar
-              calendarType="gregory" formatDay={(locale, date) => date.getDate().toString()}
-              tileClassName={({ date, view }) => {
-                if (view === 'month') {
-                  const isHoliday = hd.isHoliday(date);
-                  const classNames = [];
-                  if ((isHoliday && isHoliday.length > 0 && isHoliday[0].type === 'public') || date.getDay() === 0) {
-                    classNames.push('holiday');
-                  }
-                  if (date.getDay() === 6) {
-                    classNames.push('saturday');
-                  }
-                  return classNames.join(' ');
-                }
-                return null;
-              }}
-              onActiveStartDateChange={handleActiveStartDateChange} tileContent={renderTileContent} onClickDay={handleDateClick}
-            />
-          </CalendarWrapper>
-          <ButtonContainer>
-            <ActionButton onClick={handleShowAddForm}>일정 추가</ActionButton>
-            <CloseButton onClick={onClose}>닫기</CloseButton>
-          </ButtonContainer>
-        </CalendarContainer>
-
-        <RightPanelContainer>
-          <IconContainer>
-            {viewMode === 'calendar' ? (
-              <>
-                <TopIcon title="AI 비서" onClick={() => handleChangeViewMode('ai')}>🤖</TopIcon>
-                <TopIcon title="팀 필터" onClick={() => handleChangeViewMode('search')}>🔍</TopIcon>
-              </>
-            ) : (
-              <TopIcon title="캘린더로 돌아가기" onClick={() => handleChangeViewMode('calendar')}>
-                ❌
-              </TopIcon>
+    <Container>
+      <SidebarContainer $isCollapsed={isSidebarCollapsed}>
+        <ProjectHeader>
+          <h2>프로젝트 목록</h2>
+          <Spacer />
+          <ParticipantContainer 
+            onMouseEnter={() => setIsUserListExpanded(true)}
+            onMouseLeave={() => setIsUserListExpanded(false)}
+          >
+            {otherParticipants.slice(0, 4).map((user, index) => (
+              <OverlapAvatarWrapper key={user.id} index={index}>
+                  <UserAvatar color={user.color}>
+                      {user.id.charAt(0).toUpperCase()}
+                  </UserAvatar>
+              </OverlapAvatarWrapper>
+            ))}
+            {isUserListExpanded && (
+              <ExpandedUserList>
+                {participants.map(user => (
+                  <UserListItem key={user.id}>
+                    <UserAvatar color={user.color}>
+                      {user.id.charAt(0).toUpperCase()}
+                    </UserAvatar>
+                    <UserName>{user.id}</UserName>
+                  </UserListItem>
+                ))}
+              </ExpandedUserList>
             )}
-          </IconContainer>
-          
-          {renderRightPanelContent()}
-        </RightPanelContainer>
-      </ModalContent>
-    </ModalOverlay>
+          </ParticipantContainer>
+        </ProjectHeader>
+        <ProjectList>
+          {projects.map(p => (
+            <ProjectItem key={p.pId} $isSelected={selectedProjectId === p.pId} onClick={() => handleSelectProject(p.pId)}>
+              {editingProjectId === p.pId ? (
+                <>
+                  <ProjectNameInput
+                    type="text" value={editingProjectName}
+                    onChange={(e) => setEditingProjectName(e.target.value)}
+                    onKeyDown={handleEditKeyDown} onBlur={handleInputBlur}
+                    autoFocus onClick={(e) => e.stopPropagation()}
+                  />
+                  <ProjectActions $isEditing={true}>
+                    <button ref={confirmBtnRef} title="확인" onMouseUp={(e) => { e.stopPropagation(); handleSubmitRename(); }}>✅</button>
+                    <button ref={cancelBtnRef} title="취소" onMouseUp={(e) => { e.stopPropagation(); handleCancelEditing(); }}>❌</button>
+                  </ProjectActions>
+                </>
+              ) : (
+                <>
+                  <span>{p.pName}</span>
+                  <ProjectActions>
+                    <button title="이름 변경" onMouseUp={(e) => { e.stopPropagation(); handleStartEditing(p); }}>✏️</button>
+                    <button title="삭제" onMouseUp={(e) => { e.stopPropagation(); handleDeleteProject(p.pId); }}>🗑️</button>
+                  </ProjectActions>
+                </>
+              )}
+            </ProjectItem>
+          ))}
+        </ProjectList>
+        <Calendar 
+          onClick={() => setIsCalendarModalOpen(true)}
+          events={calendarEvents}
+          onMonthChange={setCalendarDate}
+        />
+        <CreateProjectButton onClick={handleCreateProject}>+ 새 프로젝트 생성</CreateProjectButton>
+      </SidebarContainer>
+
+      <SidebarToggle $isCollapsed={isSidebarCollapsed} onClick={() => setIsSidebarCollapsed(v => !v)}>
+        {isSidebarCollapsed ? '▶' : '◀'}
+      </SidebarToggle>
+      
+      <MainArea 
+        ref={mainAreaRef} 
+        $isTextMode={isTextMode} 
+        $isVoteCreateMode={isVoteCreateMode} 
+        $isDrawingMode={isDrawingMode} 
+        onClick={handleMainAreaClick}
+      >
+        {selectedProjectId === null ? (
+          <ProjectSelectPrompt><PromptText>👈 사이드바에서 참여할 프로젝트를 선택해주세요.</PromptText></ProjectSelectPrompt>
+        ) : (
+          <>
+            <Draggable nodeRef={toolbarRef as React.RefObject<HTMLElement>} bounds="parent">
+              <FloatingToolbar ref={toolbarRef}>
+                
+                {isDrawingMode ? (
+                  // --- 1. 그리기 모드 툴바 ---
+                  <>
+                    <ToolIcon title="펜" onClick={() => setIsEraserMode(false)} style={{ background: !isEraserMode ? COLOR.imgBg : 'transparent' }}>✏️</ToolIcon>
+                    <ToolIcon title="지우개" onClick={() => setIsEraserMode(true)} style={{ background: isEraserMode ? COLOR.imgBg : 'transparent' }}>🧼</ToolIcon>
+                    <ToolbarLabel>색상:</ToolbarLabel>
+                    <ToolbarColorInput type="color" value={drawingColor} onChange={(e) => setDrawingColor(e.target.value)} disabled={isEraserMode} />
+                    <ToolbarLabel>굵기:</ToolbarLabel>
+                    <ToolbarInput type="number" value={penWidth} onChange={(e) => setPenWidth(Number(e.target.value))} min="1" max="50" />
+                  </>
+                ) : focusedIdx === null ? (
+                  // --- 2. 기본 모드 툴바 ---
+                  <>
+                    <ToolIcon onClick={() => { setIsTextMode(prev => !prev); setIsVoteCreateMode(false); setIsDrawingMode(false); setIsEraserMode(false); }} title="텍스트 상자 생성">T</ToolIcon>
+                    <ToolIcon onClick={() => fileInputRef.current?.click()} title="이미지 추가"><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
+                    <ToolIcon onClick={handleToggleDrawingMode} title="그리기"><PenIcon /></ToolIcon>
+                  </>
+                ) : (
+                  // --- 3. 텍스트 포커스 모드 툴바 ---
+                  currentBox && (
+                    <>
+                      <ToolbarLabel>크기:</ToolbarLabel><ToolbarInput type="number" value={currentBox.size} onChange={(e) => handleAttributeChange('size', e.target.value)} min="1" />
+                      <ToolbarLabel>색상:</ToolbarLabel><ToolbarColorInput type="color" value={currentBox.color} onChange={(e) => handleAttributeChange('color', e.target.value)} />
+                      <ToolbarLabel>폰트:</ToolbarLabel><ToolbarSelect value={currentBox.font} onChange={(e) => handleAttributeChange('font', e.target.value)}>
+                        <option value="Arial">Arial</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                        <option value="'Courier New', Courier, monospace">Courier New</option>
+                      </ToolbarSelect>
+                    </>
+                  )
+                )}
+              </FloatingToolbar>
+            </Draggable>
+
+            <TextBoxes 
+              textBoxes={textBoxes} setTextBoxes={setTextBoxes} focusedIdx={focusedIdx} setFocusedIdx={setFocusedIdx} 
+              mainAreaRef={mainAreaRef} socketRef={socketRef} toolbarRef={toolbarRef} 
+              getMaxZIndex={getMaxZIndex} selectedProjectId={selectedProjectId} 
+            />
+            <VoteBoxes 
+              voteBoxes={voteBoxes} setVoteBoxes={setVoteBoxes} focusedVoteIdx={focusedVoteIdx} setFocusedVoteIdx={setFocusedVoteIdx} 
+              mainAreaRef={mainAreaRef} socketRef={socketRef} getMaxZIndex={getMaxZIndex} 
+              userId={userId} selectedProjectId={selectedProjectId}
+            />
+            <ImageBoxes 
+              imageBoxes={imageBoxes} setImageBoxes={setImageBoxes} focusedImageIdx={focusedImageIdx} setFocusedImageIdx={setFocusedImageIdx} 
+              mainAreaRef={mainAreaRef} socketRef={socketRef} getMaxZIndex={getMaxZIndex}
+              selectedProjectId={selectedProjectId}
+            />
+            
+            <DrawingCanvas
+              socketRef={socketRef}
+              selectedProjectId={selectedProjectId}
+              userId={userId} 
+              isDrawingMode={isDrawingMode}
+              drawingColor={drawingColor}
+              penWidth={penWidth}
+              isEraserMode={isEraserMode}
+              drawings={drawings}
+              setDrawings={setDrawings}
+            />
+            
+            <VideoGrid localStream={localStream} remoteStreams={remoteStreams} />
+            {Object.entries(cursors).map(([id, { x, y, color }]) => (
+                <Cursor key={id} x={x} y={y} color={color} />
+            ))}
+
+            <FloatingButtonWrap>
+              {showCreateMenu && (
+              <CreateMenu>
+                  <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setIsTextMode(false); setShowCreateMenu(false); }}>투표</CreateMenuButton>
+                  <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
+                  <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
+              </CreateMenu>
+              )}
+              <FloatingButton onClick={() => setShowCreateMenu((v) => !v)}>+</FloatingButton>
+            </FloatingButtonWrap>
+
+            {isSummaryModalOpen && (
+              <SummaryModal onClose={() => setIsSummaryModalOpen(false)}>
+                {isSummaryLoading ? (
+                  <p>요약 내용을 생성 중입니다... 🤖</p>
+                ) : (
+                  <p>{summaryContent}</p>
+                )}
+              </SummaryModal>
+            )}
+          </>
+        )}
+      </MainArea>
+
+      <CalendarModal 
+        isOpen={isCalendarModalOpen} 
+        onClose={() => setIsCalendarModalOpen(false)} 
+        socket={socket}
+        teamId={teamId}
+        events={calendarEvents}
+        activeDate={calendarDate}
+        onMonthChange={setCalendarDate}
+        showAllEvents={showAllEvents}
+        onToggleShowAll={setShowAllEvents}
+        onEventAdded={(newEvent) => setCalendarEvents(prev => [...prev, newEvent])}
+      />
+    </Container>
   );
 };
 
-export default CalendarModal;
+export default Teams;
