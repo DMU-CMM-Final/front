@@ -26,6 +26,7 @@ interface Props {
   onMonthChange: (date: Date) => void;
   showAllEvents: boolean;
   onToggleShowAll: (show: boolean) => void;
+  onEventAdded: (newEvent: CalendarEvent) => void;
 }
 
 // --- 스타일 정의 ---
@@ -152,44 +153,54 @@ const ToggleContainer = styled.div`
 
 // --- 헬퍼 함수 ---
 const toDateTimeLocalString = (date: Date) => {
+  if (!(date instanceof Date) || isNaN(date.getTime())) {
+    console.warn("Invalid date passed to toDateTimeLocalString:", date);
+    date = new Date();
+  }
   const ten = (i: number) => (i < 10 ? '0' : '') + i;
   return `${date.getFullYear()}-${ten(date.getMonth() + 1)}-${ten(date.getDate())}T${ten(date.getHours())}:${ten(date.getMinutes())}`;
 };
-const toDateInputString = (date: Date) => toDateTimeLocalString(date).slice(0, 10);
-
+const toDateInputString = (date: Date) => {
+   if (!(date instanceof Date) || isNaN(date.getTime())) {
+     console.warn("Invalid date passed to toDateInputString:", date);
+     date = new Date();
+  }
+  return toDateTimeLocalString(date).slice(0, 10);
+};
 const formatDateTimeForServer = (date: Date) => {
     const pad = (num: number) => num.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
-
 const hd = new Holidays('KR');
 
-const CalendarModal: React.FC<Props> = ({ 
-  isOpen, 
-  onClose, 
-  socket, 
-  teamId, 
-  events, 
-  activeDate, 
+// --- 컴포넌트 ---
+const CalendarModal: React.FC<Props> = ({
+  isOpen,
+  onClose,
+  socket,
+  teamId,
+  events,
+  activeDate,
   onMonthChange,
   showAllEvents,
-  onToggleShowAll
+  onToggleShowAll,
+  onEventAdded
 }) => {
   const { userEmail } = useAuth();
-  
+
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
-  
+
   const [newEvent, setNewEvent] = useState({
     title: '', description: '', startDate: new Date(),
     endDate: new Date(Date.now() + 60 * 60 * 1000), isAllDay: false, tId: teamId
   });
 
   useEffect(() => {
-    if (isOpen) { 
-      document.body.style.overflow = 'hidden'; 
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
     } else {
       setSelectedDate(null);
       setIsAddingEvent(false);
@@ -204,7 +215,7 @@ const CalendarModal: React.FC<Props> = ({
     }
     return '#B8B6F2';
   }, []);
-  
+
   const handleShowAddForm = () => {
     setIsAddingEvent(true);
     const baseDate = selectedDate ? new Date(selectedDate) : new Date();
@@ -227,8 +238,7 @@ const CalendarModal: React.FC<Props> = ({
       [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value)
     }));
   };
-  
-  // ✅ [수정 완료] '하루 종일' 일정 저장 로직 변경
+
   const handleSaveEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !userEmail || !newEvent.title) {
@@ -236,37 +246,51 @@ const CalendarModal: React.FC<Props> = ({
         return;
     }
 
-    let finalStartDate: string;
-    let finalEndDate: string;
+    let finalStartDate: Date;
+    let finalEndDate: Date;
+    let finalStartDateString: string;
+    let finalEndDateString: string;
+
+    const baseStartDate = newEvent.startDate instanceof Date && !isNaN(newEvent.startDate.getTime())
+                           ? newEvent.startDate
+                           : new Date();
 
     if (newEvent.isAllDay) {
-        const startOfDay = new Date(newEvent.startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        finalStartDate = formatDateTimeForServer(startOfDay);
-
-        // ✨ 핵심: 종료 날짜를 시작 날짜와 동일하게 설정합니다.
-        const endOfDay = new Date(newEvent.startDate);
-        endOfDay.setHours(0, 0, 0, 0); // 시간은 시작과 동일하게 맞추거나 무시해도 됩니다.
-        finalEndDate = formatDateTimeForServer(endOfDay);
+        finalStartDate = new Date(baseStartDate);
+        finalStartDate.setHours(0, 0, 0, 0);
+        finalEndDate = new Date(baseStartDate);
+        finalEndDate.setHours(0, 0, 0, 0);
     } else {
-        finalStartDate = formatDateTimeForServer(newEvent.startDate);
-        finalEndDate = formatDateTimeForServer(newEvent.endDate);
+        finalStartDate = baseStartDate;
+        finalEndDate = newEvent.endDate instanceof Date && !isNaN(newEvent.endDate.getTime())
+                       ? newEvent.endDate
+                       : new Date(finalStartDate.getTime() + 60 * 60 * 1000);
     }
+    finalStartDateString = formatDateTimeForServer(finalStartDate);
+    finalEndDateString = formatDateTimeForServer(finalEndDate);
+
 
     const payload = {
-        uId: userEmail,
+        uId: userEmail, tId: teamId, title: newEvent.title, description: newEvent.description,
+        isAllDay: newEvent.isAllDay, startDate: finalStartDateString, endDate: finalEndDateString,
+    };
+    socket.emit('calendar-new', payload);
+
+    const localNewEvent: CalendarEvent = {
+        eventId: Date.now(),
         tId: teamId,
         title: newEvent.title,
         description: newEvent.description,
-        isAllDay: newEvent.isAllDay,
-        startDate: finalStartDate,
-        endDate: finalEndDate,
+        startDate: new Date(finalStartDate), // Ensure it's a Date object
+        endDate: new Date(finalEndDate),     // Ensure it's a Date object
+        isAllDay: newEvent.isAllDay
     };
-    
-    socket.emit('calendar-new', payload);
+    console.log("Locally adding event:", localNewEvent);
+    onEventAdded(localNewEvent);
+
     setIsAddingEvent(false);
   };
-  
+
   const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!editingEvent) return;
     const { name, value, type } = e.target;
@@ -278,28 +302,33 @@ const CalendarModal: React.FC<Props> = ({
     });
   };
 
-  // ✅ [수정 완료] '하루 종일' 일정 업데이트 로직 변경
   const handleUpdateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !userEmail || !editingEvent) return;
-    
-    let finalStartDate: string;
-    let finalEndDate: string;
+
+    let finalStartDate: Date;
+    let finalEndDate: Date;
+    let finalStartDateString: string;
+    let finalEndDateString: string;
+
+    const baseStartDate = editingEvent.startDate instanceof Date && !isNaN(editingEvent.startDate.getTime())
+                           ? editingEvent.startDate
+                           : new Date(); // Fallback to current date if invalid
 
     if (editingEvent.isAllDay) {
-        const startOfDay = new Date(editingEvent.startDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        finalStartDate = formatDateTimeForServer(startOfDay);
-        
-        // ✨ 핵심: 종료 날짜를 시작 날짜와 동일하게 설정합니다.
-        const endOfDay = new Date(editingEvent.startDate);
-        endOfDay.setHours(0, 0, 0, 0);
-        finalEndDate = formatDateTimeForServer(endOfDay);
+        finalStartDate = new Date(baseStartDate);
+        finalStartDate.setHours(0, 0, 0, 0);
+        finalEndDate = new Date(baseStartDate);
+        finalEndDate.setHours(0, 0, 0, 0);
     } else {
-        finalStartDate = formatDateTimeForServer(editingEvent.startDate);
-        finalEndDate = formatDateTimeForServer(editingEvent.endDate);
+        finalStartDate = baseStartDate;
+        finalEndDate = editingEvent.endDate instanceof Date && !isNaN(editingEvent.endDate.getTime())
+                       ? editingEvent.endDate
+                       : new Date(finalStartDate.getTime() + 60 * 60 * 1000); // Fallback if invalid
     }
-    
+    finalStartDateString = formatDateTimeForServer(finalStartDate);
+    finalEndDateString = formatDateTimeForServer(finalEndDate);
+
     const payload = {
         eventId: editingEvent.eventId,
         uId: userEmail,
@@ -307,31 +336,33 @@ const CalendarModal: React.FC<Props> = ({
         title: editingEvent.title,
         description: editingEvent.description,
         isAllDay: editingEvent.isAllDay,
-        startDate: finalStartDate,
-        endDate: finalEndDate,
+        startDate: finalStartDateString,
+        endDate: finalEndDateString,
     };
 
     socket.emit('calendar-update', payload);
-    setEditingEvent(null);
+    setEditingEvent(null); // Close edit form after sending update
   };
-  
+
   const handleDeleteEvent = (eventId: number) => {
     if (!socket || !window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
     socket.emit('calendar-delete', { eventId });
-    setSelectedDate(null);
+    setSelectedDate(null); // Clear selection after delete
+    setEditingEvent(null); // Close edit form if open
   };
 
-  const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => { 
+  const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => {
     if (activeStartDate) {
       onMonthChange(activeStartDate);
     }
   };
+
   const handleDateClick = (date: Date) => {
     setSelectedDate(date);
     setIsAddingEvent(false);
     setEditingEvent(null);
   };
-  
+
   const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
     if (view !== 'month') return null;
 
@@ -339,17 +370,16 @@ const CalendarModal: React.FC<Props> = ({
     const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
 
     const dayEvents = events.filter(event => {
-        const dayStart = new Date(date);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(date);
-        dayEnd.setHours(23, 59, 59, 999);
+        const dayStart = new Date(date); dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(date); dayEnd.setHours(23, 59, 59, 999);
+        const eventStart = event.startDate instanceof Date ? new Date(event.startDate) : null;
+        const eventEnd = event.endDate instanceof Date ? new Date(event.endDate) : null;
 
-        const eventStartDay = new Date(event.startDate);
-        eventStartDay.setHours(0, 0, 0, 0);
-        const eventEndDay = new Date(event.endDate);
-        eventEndDay.setHours(23, 59, 59, 999); // 종료일도 하루 전체를 포함하도록 설정
+        if (!eventStart || !eventEnd) return false;
+        eventStart.setHours(0,0,0,0);
+        eventEnd.setHours(23,59,59,999);
 
-        return dayStart <= eventEndDay && dayEnd >= eventStartDay;
+        return dayStart <= eventEnd && dayEnd >= eventStart;
     });
 
     const maxEventsToShow = isPublicHoliday ? 1 : 2;
@@ -372,20 +402,6 @@ const CalendarModal: React.FC<Props> = ({
         </>
     );
   };
-
-  const selectedDayEvents = selectedDate ? events.filter(event => {
-      const dayStart = new Date(selectedDate);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(selectedDate);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const eventStartDay = new Date(event.startDate);
-      eventStartDay.setHours(0, 0, 0, 0);
-      const eventEndDay = new Date(event.endDate);
-      eventEndDay.setHours(23, 59, 59, 999);
-
-      return dayStart <= eventEndDay && dayEnd >= eventStartDay;
-  }) : [];
 
   const renderRightPanelContent = () => {
     if (isAddingEvent || editingEvent) {
@@ -427,24 +443,54 @@ const CalendarModal: React.FC<Props> = ({
         </>
       );
     }
+
     if (selectedDate) {
+      const selectedDayEvents = events.filter(event => {
+        const dayStart = new Date(selectedDate); dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(selectedDate); dayEnd.setHours(23, 59, 59, 999);
+        const eventStart = event.startDate instanceof Date ? new Date(event.startDate) : null;
+        const eventEnd = event.endDate instanceof Date ? new Date(event.endDate) : null;
+
+        if (!eventStart || !eventEnd) return false;
+        eventStart.setHours(0,0,0,0);
+        eventEnd.setHours(23,59,59,999);
+
+        return dayStart <= eventEnd && dayEnd >= eventStart;
+      });
+
+      console.log("Rendering details for selected day events:", selectedDayEvents.map(e => ({
+          id: e.eventId, title: e.title, start: e.startDate, isDate: e.startDate instanceof Date, end: e.endDate, isEndDate: e.endDate instanceof Date
+      })));
+
       return (
         <>
           <DetailsHeader>{selectedDate.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</DetailsHeader>
           {selectedDayEvents.length > 0 ? (
-            selectedDayEvents.map(event => (
-              <EventDetailCard key={event.eventId}>
-                <h4>{event.title}</h4>
-                <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} ~ ${event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}</p>
-                <p><strong>상세:</strong><br />{event.description}</p>
-                <DetailButtonContainer>
+            selectedDayEvents.map(event => {
+              const isValidStartDate = event.startDate instanceof Date && !isNaN(event.startDate.getTime());
+              const isValidEndDate = event.endDate instanceof Date && !isNaN(event.endDate.getTime());
+
+              const startTime = isValidStartDate
+                ? event.startDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                : '시간 정보 없음';
+              const endTime = isValidEndDate
+                ? event.endDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                : '';
+
+              return (
+                <EventDetailCard key={event.eventId}>
+                  <h4>{event.title}</h4>
+                  <p><strong>시간:</strong> {event.isAllDay ? '하루종일' : `${startTime}${endTime && startTime !== endTime ? ` ~ ${endTime}` : ''}`}</p>
+                  <p><strong>상세:</strong><br />{event.description}</p>
+                  <DetailButtonContainer>
                     <DetailButton onClick={() => setEditingEvent(event)}>일정 수정</DetailButton>
                     <DetailButton onClick={() => handleDeleteEvent(event.eventId)}>일정 삭제</DetailButton>
-                </DetailButtonContainer>
-              </EventDetailCard>
-            ))
+                  </DetailButtonContainer>
+                </EventDetailCard>
+              );
+            })
           ) : (
-            <EmptyPanel>
+             <EmptyPanel>
                 <p>등록된 일정이 없습니다.</p>
                 <AddEventButton onClick={handleShowAddForm}>새 일정 추가</AddEventButton>
             </EmptyPanel>
@@ -460,55 +506,55 @@ const CalendarModal: React.FC<Props> = ({
     );
   };
 
+
   if (!isOpen) return null;
 
   return (
     <ModalOverlay onClick={onClose}>
-      <ModalContent onClick={(e) => e.stopPropagation()}>
-        <CalendarContainer>
-          <ToggleContainer>
-            <span>전체 일정 보기</span>
-            <SwitchLabel>
-              <SwitchInput 
-                type="checkbox" 
-                checked={showAllEvents} 
-                onChange={(e) => onToggleShowAll(e.target.checked)} 
+       <ModalContent onClick={(e) => e.stopPropagation()}>
+          <CalendarContainer>
+            <ToggleContainer>
+              <span>전체 일정 보기</span>
+              <SwitchLabel>
+                <SwitchInput
+                  type="checkbox"
+                  checked={showAllEvents}
+                  onChange={(e) => onToggleShowAll(e.target.checked)}
+                />
+                <SwitchSlider />
+              </SwitchLabel>
+            </ToggleContainer>
+            <CalendarWrapper>
+              {loading && <div style={{ position: 'absolute', zIndex: 1, top: '50%', left: '50%', transform: 'translate(-50%, -50%)'}}>로딩 중...</div>}
+              <Calendar
+                calendarType="gregory" formatDay={(locale, date) => date.getDate().toString()}
+                tileClassName={({ date, view }) => {
+                  if (view === 'month') {
+                    const isHoliday = hd.isHoliday(date);
+                    const classNames = [];
+                    if ((isHoliday && isHoliday.length > 0 && isHoliday[0].type === 'public') || date.getDay() === 0) {
+                      classNames.push('holiday');
+                    }
+                    if (date.getDay() === 6) {
+                      classNames.push('saturday');
+                    }
+                    return classNames.join(' ');
+                  }
+                  return null;
+                }}
+                onActiveStartDateChange={handleActiveStartDateChange} tileContent={renderTileContent} onClickDay={handleDateClick}
+                value={activeDate}
               />
-              <SwitchSlider />
-            </SwitchLabel>
-          </ToggleContainer>
-          <CalendarWrapper>
-            {loading && <div style={{ position: 'absolute', zIndex: 1, top: '50%', left: '50%', transform: 'translate(-50%, -50%)'}}>로딩 중...</div>}
-            <Calendar
-              calendarType="gregory" formatDay={(locale, date) => date.getDate().toString()}
-              tileClassName={({ date, view }) => {
-                if (view === 'month') {
-                  const isHoliday = hd.isHoliday(date);
-                  const classNames = [];
-                  if ((isHoliday && isHoliday.length > 0 && isHoliday[0].type === 'public') || date.getDay() === 0) {
-                    classNames.push('holiday');
-                  }
-                  if (date.getDay() === 6) {
-                    classNames.push('saturday');
-                  }
-                  return classNames.join(' ');
-                }
-                return null;
-              }}
-              onActiveStartDateChange={handleActiveStartDateChange} tileContent={renderTileContent} onClickDay={handleDateClick}
-              value={activeDate}
-            />
-          </CalendarWrapper>
-          <ButtonContainer>
-            <ActionButton onClick={handleShowAddForm}>일정 추가</ActionButton>
-            <CloseButton onClick={onClose}>닫기</CloseButton>
-          </ButtonContainer>
-        </CalendarContainer>
-
-        <RightPanelContainer>
-          {renderRightPanelContent()}
-        </RightPanelContainer>
-      </ModalContent>
+            </CalendarWrapper>
+            <ButtonContainer>
+              <ActionButton onClick={handleShowAddForm}>일정 추가</ActionButton>
+              <CloseButton onClick={onClose}>닫기</CloseButton>
+            </ButtonContainer>
+          </CalendarContainer>
+          <RightPanelContainer>
+            {renderRightPanelContent()}
+          </RightPanelContainer>
+       </ModalContent>
     </ModalOverlay>
   );
 };
