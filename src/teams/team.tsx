@@ -80,9 +80,9 @@ const Teams: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   
-  //const { userId, teamId } = location.state || {}; // 🚀 [수정] 테스트용 하드코딩 제거
-  const userId = "dg0319@naver.com"; // 테스트용
-  const teamId = "1"; // 테스트용
+  const { userId, teamId } = location.state || {}; // 🚀 [수정] 테스트용 하드코딩 제거
+  //const userId = "dg0319@naver.com"; // 테스트용
+  //const teamId = "1"; // 테스트용
 
   useEffect(() => {
     const token = localStorage.getItem("accessToken");
