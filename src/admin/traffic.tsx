@@ -195,6 +195,10 @@ const Traffic = () => {
           return t.tname;
         });
         const teamScoreData = data.team.map(t => t.score);
+
+        console.log("API에서 받은 원본 data.team:", data.team);
+        console.log("Bar 차트 X축 레이블 (teamLabels):", teamLabels);
+        console.log("Bar 차트 데이터 (teamScoreData):", teamScoreData);
         
         setBarData({
           labels: teamLabels,

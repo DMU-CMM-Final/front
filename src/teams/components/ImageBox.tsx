@@ -5,7 +5,7 @@ import { ButtonGroup, CircleBtn, ResizeHandle } from './SharedStyles';
 
 type ImageBox = {
   node: string; x: number; y: number; width: number; height: number;
-  fileName: string; mimeType: string; tId: string; pId: string;
+  fileName: string; mimeType: string; tId: number; pId: number;
   uId: string; zIndex?: number;
 };
 
@@ -106,9 +106,11 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
     window.removeEventListener("mouseup", handleDragOrResizeEnd);
   }, [selectedProjectId, socketRef]);
 
+
   return (
     <>
       {imageBoxes.map((img, idx) => (
+        //console.log("Rendering image:", img.node, "pId:", img.pId, "tId:", img.tId);
         <ImageBoxWrap
           key={img.node}
           $focused={focusedImageIdx === idx}
@@ -118,6 +120,7 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
           onMouseDown={() => bringToFront(idx)}
           onBlur={() => setFocusedImageIdx(cur => (cur === idx ? null : cur))}
         >
+          {/* 🚀 [수정] String() 변환 제거, 숫자 그대로 URL에 포함 */}
           <img src={`https://blanksync.o-r.kr/node/api/image/${img.node}/${img.pId}/${img.tId}`} alt="" style={{ width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} draggable={false} />
           {focusedImageIdx === idx && (
             <>
@@ -134,19 +137,17 @@ const ImageBoxes: React.FC<ImageBoxesProps> = ({
   );
 };
 
-// ImageBox.tsx
-
-const ImageBoxWrap = styled.div<{ $focused: boolean }>` // ✅ 타입 정의 수정
+const ImageBoxWrap = styled.div<{ $focused: boolean }>` 
   position: absolute;
   min-width: ${MIN_WIDTH}px;
   min-height: ${MIN_HEIGHT}px;
   background: transparent;
-  border: 2px solid ${({ $focused }) => ($focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')}; // ✅ 사용 부분 수정
+  border: 2px solid ${({ $focused }) => ($focused ? 'rgba(107, 91, 149, 0.5)' : 'transparent')}; 
   border-radius: 8px;
   box-sizing: border-box;
   padding: 0;
   &:hover {
-    border-color: ${({ $focused }) => ($focused ? '#6b5b95' : 'transparent')}; // ✅ 사용 부분 수정
+    border-color: ${({ $focused }) => ($focused ? '#6b5b95' : 'transparent')}; 
   }
 `;
 export default ImageBoxes;

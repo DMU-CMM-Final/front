@@ -236,13 +236,23 @@ export const CreateProjectButton = styled.button`
   }
 `;
 
-export const MainArea = styled.main<{ $isTextMode?: boolean; $isVoteCreateMode?: boolean; }>`
+// 🚀 [수정] $isDrawingMode 타입 추가 및 cursor 로직 수정
+export const MainArea = styled.main<{ 
+  $isTextMode?: boolean; 
+  $isVoteCreateMode?: boolean; 
+  $isDrawingMode?: boolean; 
+}>`
   flex-grow: 1;
   position: relative;
   overflow: hidden;
   background-color: ${COLOR.bg};
   padding: 40px 64px;
-  cursor: ${({ $isVoteCreateMode, $isTextMode }) => $isVoteCreateMode ? 'crosshair' : $isTextMode ? 'text' : "default"};
+  
+  cursor: ${({ $isDrawingMode, $isVoteCreateMode, $isTextMode }) => 
+    $isDrawingMode ? 'crosshair' : 
+    $isVoteCreateMode ? 'crosshair' : 
+    $isTextMode ? 'text' : 
+    "default"};
 `;
 
 export const ProjectSelectPrompt = styled.div`

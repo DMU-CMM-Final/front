@@ -2,43 +2,41 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 
 // --- 타입 정의 ---
-interface TextBox {
-  node: string;
-  tId: string;
-  pId: number;
-  uId: string;
+export interface DrawingStrokePoint {
   x: number;
   y: number;
-  width: number;
-  height: number;
-  text: string;
-  color: string;
-  font: string;
-  size: number;
-  zIndex?: number;
-  isOptimistic?: boolean;
 }
-
+export interface DrawingStroke {
+  node: string;
+  pId: number;
+  uId: string;
+  color: string;
+  width: number;
+  isEraser: boolean;
+  points: DrawingStrokePoint[];
+}
+interface TextBox {
+  node: string; tId: string; pId: number; uId: string; x: number; y: number;
+  width: number; height: number; text: string; color: string; font: string;
+  size: number; zIndex?: number; isOptimistic?: boolean;
+}
 interface VoteBox {
   node: string; tId: string; pId: number; uId: string; x: number; y: number;
   width: number; height: number; title: string; list: any[]; count: number[];
   users: any[]; zIndex?: number;
 }
-
 interface ImageBox {
-  node: string; tId: string; pId: number; uId: string; x: number; y: number;
+  node: string; tId: number; pId: number; uId: string; x: number; y: number;
   width: number; height: number; fileName: string; mimeType: string; zIndex?: number;
 }
-
 type VoteUser = { uId: string, num: number };
-
 
 export const useObjectManager = (socket: Socket | null, userId: string, selectedProjectId: number | null) => {
   const [textBoxes, setTextBoxes] = useState<TextBox[]>([]);
   const [voteBoxes, setVoteBoxes] = useState<VoteBox[]>([]);
   const [imageBoxes, setImageBoxes] = useState<ImageBox[]>([]);
+  const [drawings, setDrawings] = useState<DrawingStroke[]>([]);
 
-  // selectedProjectId를 추적할 ref 생성
   const projectIdRef = useRef(selectedProjectId);
   useEffect(() => {
     projectIdRef.current = selectedProjectId;
@@ -48,10 +46,10 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     setTextBoxes(data.texts || []);
     setVoteBoxes(data.votes || []);
     setImageBoxes(data.images || []);
+    setDrawings(data.drawings || []); 
   }, []);
 
   const onAddTextBox = useCallback((data: any) => {
-    // prop 대신 ref의 최신 값을 사용
     if (data.pId !== projectIdRef.current) return;
     const newBoxFromServer: TextBox = {
       node: data.node, tId: data.tId, pId: data.pId, uId: data.uId,
@@ -153,9 +151,12 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
   }, []);
     
   const onAddImage = useCallback((data: any) => {
-    if (data.pId !== projectIdRef.current) return;
+    if (Number(data.pId) !== projectIdRef.current) return;
     const newImage: ImageBox = {
-        node: data.node, tId: data.tId, pId: data.pId, uId: data.uId,
+        node: data.node,
+        tId: Number(data.tId),
+        pId: Number(data.pId), 
+        uId: data.uId,
         x: data.cLocate?.x || 10, y: data.cLocate?.y || 10,
         width: data.cScale?.width || 200, height: data.cScale?.height || 200,
         fileName: data.fileName, mimeType: data.mimeType, zIndex: data.zIndex
@@ -165,7 +166,7 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
         if (!boxExists) return [...prev, newImage];
         return prev;
     });
-  }, []);
+  }, []); 
 
   const onMoveImage = useCallback((data: any) => {
     if (data.pId !== projectIdRef.current) return;
@@ -180,9 +181,53 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     setImageBoxes(prev => prev.filter(box => box.node !== data.node));
   }, []);
 
+  // --- 실시간 드로잉 이벤트 리스너 ---
+  
+  // [수정] 획 시작 (중복 확인 로직)
+  const onRemoteStartDrawing = useCallback((data: { stroke: DrawingStroke }) => {
+    if (data.stroke.pId !== projectIdRef.current) return;
+    
+    // [핵심] 
+    // 서버가 나에게도 획을 다시 보내주므로,
+    // 내가 낙관적 업데이트로 이미 추가한 획인지(node가 같은지) 확인합니다.
+    setDrawings(prev => {
+      const strokeExists = prev.some(s => s.node === data.stroke.node);
+      if (strokeExists) {
+        return prev; // 이미 있으면 추가하지 않음 (중복 방지)
+      }
+      return [...prev, data.stroke];
+    });
+  }, [projectIdRef]); // drawings 의존성 제거
+
+  // 획 이동 (다른 사람)
+  const onRemoteDrawingEvent = useCallback((data: { node: string, x: number, y: number, uId: string, pId: number }) => {
+    // [핵심] 내가 그린 획(uId === userId)에 대한 이벤트는 무시.
+    if (data.uId === userId || data.pId !== projectIdRef.current) return;
+    
+    const newPoint = { x: data.x, y: data.y };
+    setDrawings(prev => 
+      prev.map(stroke =>
+        stroke.node === data.node
+          ? { ...stroke, points: [...stroke.points, newPoint] }
+          : stroke
+      )
+    );
+  }, [userId]);
+  
+  // 획 종료
+  const onRemoteFinishDrawing = useCallback(() => {
+    // 로컬 상태에서는 특별히 할 일 없음
+  }, []);
+
+  // 획 삭제
+  const onRemoteRemoveStroke = useCallback((data: { node: string, pId: number }) => {
+    if (data.pId !== projectIdRef.current) return;
+    setDrawings(prev => prev.filter(stroke => stroke.node !== data.node));
+  }, []);
+
+
   useEffect(() => {
     if (!socket) return;
-
     socket.on("init", onInit);
     socket.on("project-init", onInit);
     socket.on("addTextBox", onAddTextBox);
@@ -197,6 +242,12 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     socket.on("addImage", onAddImage);
     socket.on("moveImage", onMoveImage);
     socket.on("removeImage", onRemoveImage);
+    
+    // 드로잉 리스너 등록
+    socket.on("remote-start-drawing", onRemoteStartDrawing);
+    socket.on("remote-drawing-event", onRemoteDrawingEvent);
+    socket.on("remote-finish-drawing", onRemoteFinishDrawing);
+    socket.on("remote-drawing-stroke", onRemoteRemoveStroke);
 
     return () => {
       socket.off("init", onInit);
@@ -213,10 +264,17 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
       socket.off("addImage", onAddImage);
       socket.off("moveImage", onMoveImage);
       socket.off("removeImage", onRemoveImage);
+      
+      // 드로잉 리스너 해제
+      socket.off("remote-start-drawing", onRemoteStartDrawing);
+      socket.off("remote-drawing-event", onRemoteDrawingEvent);
+      socket.off("remote-finish-drawing", onRemoteFinishDrawing);
+      socket.off("remote-drawing-stroke", onRemoteRemoveStroke);
     };
   }, [socket, onInit, onAddTextBox, onUpdateTextBox, onMoveTextBox, onRemoveTextBox, 
       onAddVote, onUpdateVote, onMoveVote, onRemoveVote, onChoiceVote,
-      onAddImage, onMoveImage, onRemoveImage]);
+      onAddImage, onMoveImage, onRemoveImage,
+      onRemoteStartDrawing, onRemoteDrawingEvent, onRemoteFinishDrawing, onRemoteRemoveStroke]);
 
-  return { textBoxes, setTextBoxes, voteBoxes, setVoteBoxes, imageBoxes, setImageBoxes };
+  return { textBoxes, setTextBoxes, voteBoxes, setVoteBoxes, imageBoxes, setImageBoxes, drawings, setDrawings };
 };
