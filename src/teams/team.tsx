@@ -285,7 +285,7 @@ const Teams: React.FC = () => {
   useEffect(() => {
     if (!userId || !teamId) {
       alert("잘못된 접근입니다. 프로젝트 목록으로 돌아갑니다.");
-      navigate('/projects');
+      navigate('/projectList');
     }
   }, [userId, teamId, navigate]);
 
