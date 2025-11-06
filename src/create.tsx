@@ -163,6 +163,34 @@ const Create: React.FC = () => {
     navigate("/");
   };
 
+  const handleCompleteCreation = () => {
+    if (tid === null) {
+      // 혹시 모를 오류 상황 방지
+      alert("팀 ID가 없습니다. 다시 시도해 주세요.");
+      return;
+    }
+
+    // 1. Team.tsx가 필요로 하는 userId (userEmail)를 localStorage에서 가져옵니다.
+    //    (Team.tsx의 useAuth()가 아닌 location.state에서 userId를 찾고 있으므로 전달해줘야 합니다.)
+    const userId = localStorage.getItem("userEmail");
+
+    // 2. userId가 없으면(로그인 정보가 없으면) 오류 처리
+    if (!userId) {
+      alert("로그인 정보가 없습니다. 다시 로그인해 주세요.");
+      navigate("/login"); // 혹은 메인 페이지로
+      return;
+    }
+    
+    // 3. navigate("/team")을 호출할 때,
+    //    두 번째 인자로 { state: { ... } } 객체를 전달합니다.
+    navigate("/team", {
+      state: {
+        teamId: tid.toString(), // Team.tsx가 받을 teamId
+        userId: userId          // Team.tsx가 받을 userId
+      }
+    });
+  };
+
   return (
     <Container>
       <Header />
@@ -233,7 +261,7 @@ const Create: React.FC = () => {
               )}
               <ButtonRow>
                 <MainButton
-                  onClick={() => navigate("/team")}
+                  onClick={handleCompleteCreation}
                   disabled={invitedMembers.length === 0}
                 >
                   완료
