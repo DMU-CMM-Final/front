@@ -1,3 +1,4 @@
+// [파일명: useObjectManager.ts]
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 
@@ -31,11 +32,25 @@ interface ImageBox {
 }
 type VoteUser = { uId: string, num: number };
 
+// (서버 -> 클라이언트) remote-start-drawing 명세 타입
+interface RemoteStartDrawingData {
+  x: number;
+  y: number;
+  pId: number;
+  node: string;
+  color: string;
+  width: number;
+  isEraser: boolean;
+  uId: string; // 🚀 명세에 따라 서버가 uId를 줌
+}
+
 export const useObjectManager = (socket: Socket | null, userId: string, selectedProjectId: number | null) => {
-  const [textBoxes, setTextBoxes] = useState<TextBox[]>([]);
-  const [voteBoxes, setVoteBoxes] = useState<VoteBox[]>([]);
-  const [imageBoxes, setImageBoxes] = useState<ImageBox[]>([]);
-  const [drawings, setDrawings] = useState<DrawingStroke[]>([]);
+  const [textBoxes, setTextBoxes] = (useState<TextBox[]>([]));
+  const [voteBoxes, setVoteBoxes] = (useState<VoteBox[]>([]));
+  const [imageBoxes, setImageBoxes] = (useState<ImageBox[]>([]));
+  
+  const [snapshotData, setSnapshotData] = (useState<string | null>(null));
+  const [drawings, setDrawings] = (useState<DrawingStroke[]>([])); 
 
   const projectIdRef = useRef(selectedProjectId);
   useEffect(() => {
@@ -46,9 +61,23 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     setTextBoxes(data.texts || []);
     setVoteBoxes(data.votes || []);
     setImageBoxes(data.images || []);
-    setDrawings(data.drawings || []); 
+    
+    // 🚀 이 로직이 'snapshot-updated' 이벤트에서도 실행됩니다.
+    setSnapshotData(data.snapshotData || null);
+    setDrawings([]); // 🚀 캔버스 획(수정사항)을 비웁니다.
   }, []);
 
+  const onSnapshotUpdated = useCallback((data: any) => {
+    // 1. 서버가 snapshotData를 보냈는지 확인
+    if (data.snapshotData !== undefined) {
+      setSnapshotData(data.snapshotData);
+    }
+    // 2. 획(수정사항)은 항상 비웁니다.
+    // (이래야 '나가기' 로직이 제대로 동작합니다)
+    setDrawings([]);
+  }, []); // 의존성 배열은 비워 둡니다.
+
+  // ... (textBox, voteBox, imageBox 핸들러는 이전과 동일) ...
   const onAddTextBox = useCallback((data: any) => {
     if (data.pId !== projectIdRef.current) return;
     const newBoxFromServer: TextBox = {
@@ -183,26 +212,41 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
 
   // --- 실시간 드로잉 이벤트 리스너 ---
   
-  // [수정] 획 시작 (중복 확인 로직)
-  const onRemoteStartDrawing = useCallback((data: { stroke: DrawingStroke }) => {
-    if (data.stroke.pId !== projectIdRef.current) return;
+  // 획 시작 (서버가 uId를 포함해서 보내줌)
+  const onRemoteStartDrawing = useCallback((data: RemoteStartDrawingData) => {
+    if (data.pId !== projectIdRef.current) return;
     
-    // [핵심] 
-    // 서버가 나에게도 획을 다시 보내주므로,
-    // 내가 낙관적 업데이트로 이미 추가한 획인지(node가 같은지) 확인합니다.
-    setDrawings(prev => {
-      const strokeExists = prev.some(s => s.node === data.stroke.node);
-      if (strokeExists) {
-        return prev; // 이미 있으면 추가하지 않음 (중복 방지)
-      }
-      return [...prev, data.stroke];
-    });
-  }, [projectIdRef]); // drawings 의존성 제거
+    // 🚀 [수정] 
+    // 명세에 따라 서버가 uId를 주므로, 이 uId로 내가 보낸 획인지 판별합니다.
+    // (이 로직은 "유지"하는 것이 맞습니다.)
+    if (data.uId === userId) return; 
 
-  // 획 이동 (다른 사람)
-  const onRemoteDrawingEvent = useCallback((data: { node: string, x: number, y: number, uId: string, pId: number }) => {
-    // [핵심] 내가 그린 획(uId === userId)에 대한 이벤트는 무시.
-    if (data.uId === userId || data.pId !== projectIdRef.current) return;
+    // 수신한 '펼쳐진' 데이터를 'DrawingStroke' 객체로 재구성
+    const newStroke: DrawingStroke = {
+      node: data.node,
+      pId: data.pId,
+      uId: data.uId,
+      color: data.color,
+      width: data.width,
+      isEraser: data.isEraser,
+      points: [{ x: data.x, y: data.y }]
+    };
+
+    setDrawings(prev => {
+      const strokeExists = prev.some(s => s.node === newStroke.node);
+      if (strokeExists) return prev; 
+      return [...prev, newStroke];
+    });
+  }, [userId, projectIdRef]);
+
+  // 획 이동 (서버가 uId를 안줌)
+  const onRemoteDrawingEvent = useCallback((data: { node: string, x: number, y: number, pId: number }) => {
+    // 🚀 [수정] 
+    // 명세에 uId가 없으므로 uId 필터링 로직을 "제거"합니다.
+    // (서버가 보낸 사람을 제외하고 broadcast 한다고 가정합니다.)
+    // if (data.uId && data.uId === userId) return; // 🚀 이 로직 제거
+    
+    if (data.pId !== projectIdRef.current) return;
     
     const newPoint = { x: data.x, y: data.y };
     setDrawings(prev => 
@@ -212,7 +256,7 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
           : stroke
       )
     );
-  }, [userId]);
+  }, [projectIdRef]); // 🚀 의존성 배열에서 userId 제거
   
   // 획 종료
   const onRemoteFinishDrawing = useCallback(() => {
@@ -230,6 +274,11 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     if (!socket) return;
     socket.on("init", onInit);
     socket.on("project-init", onInit);
+
+    // 🚀 [추가] 서버가 스냅샷 저장을 완료하고 브로드캐스트하는 이벤트
+    // (서버가 init과 동일한 데이터 구조(snapshotData 필드 포함)를 보내야 함)
+    socket.on("snapshot-updated", onSnapshotUpdated); 
+    
     socket.on("addTextBox", onAddTextBox);
     socket.on("updateTextBox", onUpdateTextBox);
     socket.on("moveTextBox", onMoveTextBox);
@@ -245,13 +294,14 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
     
     // 드로잉 리스너 등록
     socket.on("remote-start-drawing", onRemoteStartDrawing);
-    socket.on("remote-drawing-event", onRemoteDrawingEvent);
+    socket.on("remote-drawing-event", onRemoteDrawingEvent); // 🚀 핸들러 수정됨
     socket.on("remote-finish-drawing", onRemoteFinishDrawing);
     socket.on("remote-drawing-stroke", onRemoteRemoveStroke);
 
     return () => {
       socket.off("init", onInit);
       socket.off("project-init", onInit);
+      socket.off("snapshot-updated", onSnapshotUpdated); // 🚀 [추가] 리스너 해제
       socket.off("addTextBox", onAddTextBox);
       socket.off("updateTextBox", onUpdateTextBox);
       socket.off("moveTextBox", onMoveTextBox);
@@ -274,7 +324,13 @@ export const useObjectManager = (socket: Socket | null, userId: string, selected
   }, [socket, onInit, onAddTextBox, onUpdateTextBox, onMoveTextBox, onRemoveTextBox, 
       onAddVote, onUpdateVote, onMoveVote, onRemoveVote, onChoiceVote,
       onAddImage, onMoveImage, onRemoveImage,
-      onRemoteStartDrawing, onRemoteDrawingEvent, onRemoteFinishDrawing, onRemoteRemoveStroke]);
+      onRemoteStartDrawing, onRemoteDrawingEvent, onRemoteFinishDrawing, onRemoteRemoveStroke, onSnapshotUpdated]);
 
-  return { textBoxes, setTextBoxes, voteBoxes, setVoteBoxes, imageBoxes, setImageBoxes, drawings, setDrawings };
+  return { 
+    textBoxes, setTextBoxes, 
+    voteBoxes, setVoteBoxes, 
+    imageBoxes, setImageBoxes, 
+    drawings, setDrawings,
+    snapshotData 
+  };
 };

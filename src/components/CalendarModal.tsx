@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
 import Holidays from 'date-holidays';
-import { useAuth } from '../contexts/AuthContext';
-import api from '../api';
+// import { useAuth } from '../contexts/AuthContext'; // 1. useAuth 제거
+import api from '../api'; // 캘린더 조회(fetchEvents)용
+import axios from 'axios'; // AI 서버 호출(handleAISubmit)용
 
 // --- 타입 정의 ---
 interface CalendarEvent {
@@ -15,6 +16,11 @@ interface CalendarEvent {
   startDate: Date;
   endDate: Date;
   isAllDay: boolean;
+}
+
+interface ChatMessage {
+  role: 'user' | 'ai' | 'system';
+  content: string;
 }
 
 // --- 스타일 정의 (변경 없음) ---
@@ -135,17 +141,6 @@ const EmptyPanel = styled.div`
 const AddEventButton = styled(ActionButton)`
   margin-top: 16px;
 `;
-const SearchIcon = styled.div`
-  position: absolute; 
-  top: 0px;
-  right: 0px;
-  font-size: 1.5rem; 
-  cursor: pointer;
-  padding: 5px; 
-  line-height: 1; 
-  &:hover { opacity: 0.7; }
-  z-index: 10;
-`;
 const SearchContainer = styled.div`
   padding: 10px; border-bottom: 1px solid #eee;
 `;
@@ -171,22 +166,74 @@ const ClearFilterButton = styled.button`
   background: none; border: none; color: #007bff; cursor: pointer;
   text-decoration: underline; font-size: 0.9rem;
 `;
+const IconContainer = styled.div`
+  position: absolute; top: 0px; right: 0px; z-index: 10;
+  display: flex; gap: 8px; padding: 5px;
+`;
+const TopIcon = styled.div`
+  font-size: 1.5rem; cursor: pointer; padding: 5px; line-height: 1;
+  &:hover { opacity: 0.7; }
+`;
+const AIChatPanel = styled.div`
+  display: flex; flex-direction: column; height: 100%;
+  width: 100%;
+`;
+const AIMessageHistory = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 0;
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 10px;
+`;
+const AIMessage = styled.div<{ role: 'user' | 'ai' | 'system' }>`
+  padding: 8px 12px;
+  border-radius: 18px;
+  max-width: 85%;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  
+  background-color: ${props => 
+    props.role === 'user' ? '#B8B6F2' : (props.role === 'system' ? '#fffbe6' : '#f0f0f0')};
+  color: ${props => (props.role === 'user' ? 'white' : '#111')};
+  align-self: ${props => (props.role === 'user' ? 'flex-end' : 'flex-start')};
+  border: ${props => (props.role === 'system' ? '1px solid #ffe58f' : 'none')};
+`;
+const AITypingIndicator = styled.div`
+  font-style: italic; color: #888; font-size: 0.9rem;
+  padding: 10px 0;
+  align-self: flex-start;
+`;
+const AIChatForm = styled.form`
+  margin-top: auto;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+  display: flex;
+  gap: 8px;
+`;
+const AIChatInput = styled.input`
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 0.9rem;
+`;
+const AIChatButton = styled(ActionButton)`
+  padding: 8px 12px;
+  height: 40px;
+`;
 
-// --- 헬퍼 함수 ---
+// --- 헬퍼 함수 (변경 없음) ---
 interface Props { isOpen: boolean; onClose: () => void; }
-
 const toDateTimeLocalString = (date: Date) => {
   const ten = (i: number) => (i < 10 ? '0' : '') + i;
   return `${date.getFullYear()}-${ten(date.getMonth() + 1)}-${ten(date.getDate())}T${ten(date.getHours())}:${ten(date.getMinutes())}`;
 };
 const toDateInputString = (date: Date) => toDateTimeLocalString(date).slice(0, 10);
-
-// 수정된 부분: 서버와 통신할 때 사용할 날짜 포맷 함수
 const formatDateTimeForServer = (date: Date) => {
     const pad = (num: number) => num.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
-
 const hslToHex = (h: number, s: number, l: number): string => {
   s /= 100; l /= 100;
   const k = (n: number) => (n + h / 30) % 12;
@@ -195,27 +242,40 @@ const hslToHex = (h: number, s: number, l: number): string => {
   const toHex = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
   return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
 };
-
 const generateDeterministicColor = (id: number): string => {
   const hue = (id * 37) % 360;
   const saturation = 70;
   const lightness = 65;
   return hslToHex(hue, saturation, lightness);
 };
-
 const hd = new Holidays('KR');
+const ChatHistoryRef = React.createRef<HTMLDivElement>();
+
 
 const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { userEmail } = useAuth();
+  // --- (수정) localStorage에서 직접 가져오기 ---
+  const userEmail = localStorage.getItem("userEmail"); 
+
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [activeDate, setActiveDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilterTName, setActiveFilterTName] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'calendar' | 'ai' | 'search'>('calendar');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { role: 'system', content: '안녕하세요! AI-Cal 비서입니다. \n"내일 3시 30분 팀 미팅"처럼 말씀해주시면 일정을 추가해 드립니다.' }
+  ]);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isAILoading, setIsAILoading] = useState(false);
+  
+  useEffect(() => {
+    if (ChatHistoryRef.current) {
+      ChatHistoryRef.current.scrollTop = ChatHistoryRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   const [newEvent, setNewEvent] = useState({
     title: '', description: '', startDate: new Date(),
@@ -241,21 +301,18 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const fetchEvents = useCallback(async (date: Date) => {
     if (!userEmail) return;
     setLoading(true);
-
+    
     const dateParam = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
     try {
+      // (변경 없음) api 인스턴스는 자동으로 토큰을 첨부합니다.
       const response = await api.get<any[]>('/spring/calendar', {
         params: {
           uId: userEmail,
           date: dateParam
         }
       });
-
       const data: any[] = response.data;
-
       console.log("Fetched raw calendar data from API:", data);
-
-      // 수정된 부분: 시간대 정보가 없는 문자열을 new Date()로 바로 파싱하여 지역 시간으로 인식
       const processedEvents: CalendarEvent[] = data.map((event: any) => ({
         ...event,
         tId: event.tid,
@@ -266,7 +323,6 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       setEvents(processedEvents);
     } catch (error) { 
       console.error("캘린더 데이터를 가져오는 데 실패했습니다:", error); 
-
       if (error && typeof error === 'object' && 'response' in error) {
         const responseData = (error as any).response?.data;
         alert(responseData?.message || "캘린더 데이터 로딩에 실패했습니다.");
@@ -275,26 +331,33 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       }
     }
     finally { setLoading(false); }
-  }, [userEmail]);
+  }, [userEmail]); // userEmail이 변경될 때만 함수 재생성
 
   useEffect(() => {
-    if (isOpen) { fetchEvents(activeDate); }
-    else {
+    if (isOpen && userEmail) { // userEmail이 있을 때만 fetch
+      fetchEvents(activeDate); 
+    } else if (!isOpen) {
       setSelectedDate(null);
       setIsAddingEvent(false);
       setEditingEvent(null);
-      setIsSearching(false);
       setSearchTerm('');
       setActiveFilterTName(null);
+      setAiPrompt('');
+      setIsAILoading(false);
+      setViewMode('calendar'); 
+      setChatMessages([ 
+        { role: 'system', content: '안녕하세요! AI-Cal 비서입니다. \n"내일 3시 30분 팀 미팅"처럼 말씀해주시면 일정을 추가해 드립니다.' }
+      ]);
     }
-  }, [isOpen, activeDate, fetchEvents]);
+  }, [isOpen, activeDate, fetchEvents, userEmail]); // userEmail 의존성 추가
 
+  // --- 기존 일정 추가/수정/삭제 핸들러 (변경 없음) ---
   const handleShowAddForm = () => {
+    setViewMode('calendar'); 
     setIsAddingEvent(true);
     const baseDate = selectedDate ? new Date(selectedDate) : new Date();
     const currentTime = new Date();
     baseDate.setHours(currentTime.getHours(), currentTime.getMinutes());
-
     setNewEvent({
         title: '',
         description: '',
@@ -303,25 +366,20 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         isAllDay: false,
     });
   };
-
   const handleNewEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
     setNewEvent(prev => ({ ...prev, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) }));
   };
-
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEvent.title) { alert("제목을 입력해주세요."); return; }
-
     let finalStartDate: string;
     let finalEndDate: string;
-    
     if (newEvent.isAllDay) {
         const startOfDay = new Date(newEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
         finalStartDate = formatDateTimeForServer(startOfDay);
-
         const endOfDay = new Date(newEvent.endDate);
         endOfDay.setHours(23, 59, 59, 999);
         finalEndDate = formatDateTimeForServer(endOfDay);
@@ -329,26 +387,20 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         finalStartDate = formatDateTimeForServer(newEvent.startDate);
         finalEndDate = formatDateTimeForServer(newEvent.endDate);
     }
-
     const payload = {
-        uId: userEmail,
+        uId: userEmail, // localStorage에서 가져온 userEmail 사용
         title: newEvent.title,
         description: newEvent.description,
         isAllDay: newEvent.isAllDay,
         startDate: finalStartDate,
         endDate: finalEndDate,
     };
-
-    console.log('Sending this payload to Spring:', JSON.stringify(payload, null, 2));
-
     try {
         await api.post('/spring/calendar/new', payload);
-        
         setIsAddingEvent(false);
         await fetchEvents(activeDate);
     } catch (error) { 
       console.error(error); alert(String(error)); 
-
       if (error && typeof error === 'object' && 'response' in error) {
         const responseData = (error as any).response?.data;
         alert(responseData?.message || "일정 저장에 실패했습니다.");
@@ -357,26 +409,21 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       }
     }
   };
-
   const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!editingEvent) return;
     const { name, value, type } = e.target;
     const isCheckbox = type === 'checkbox';
     setEditingEvent({ ...editingEvent, [name]: isCheckbox ? (e.target as HTMLInputElement).checked : (name === 'startDate' || name === 'endDate' ? new Date(value) : value) });
   };
-
   const handleUpdateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEvent) { alert("수정할 일정이 없습니다."); return; }
-
     let finalStartDate: string;
     let finalEndDate: string;
-
     if (editingEvent.isAllDay) {
         const startOfDay = new Date(editingEvent.startDate);
         startOfDay.setHours(0, 0, 0, 0);
         finalStartDate = formatDateTimeForServer(startOfDay);
-
         const endOfDay = new Date(editingEvent.endDate);
         endOfDay.setHours(23, 59, 59, 999);
         finalEndDate = formatDateTimeForServer(endOfDay);
@@ -384,25 +431,21 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         finalStartDate = formatDateTimeForServer(editingEvent.startDate);
         finalEndDate = formatDateTimeForServer(editingEvent.endDate);
     }
-
     const payload = {
       eventId: editingEvent.eventId,
-      uId: userEmail,
+      uId: userEmail, // localStorage에서 가져온 userEmail 사용
       title: editingEvent.title,
       description: editingEvent.description,
       isAllDay: editingEvent.isAllDay,
       startDate: finalStartDate,
       endDate: finalEndDate,
     };
-
     try {
       await api.post('/spring/calendar/update', payload);
-
       setEditingEvent(null);
       await fetchEvents(activeDate);
     } catch (error) { 
       console.error(error); alert(String(error)); 
-
       if (error && typeof error === 'object' && 'response' in error) {
         const responseData = (error as any).response?.data;
         alert(responseData?.message || "일정 수정에 실패했습니다.");
@@ -411,19 +454,16 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       }
     }
   };
-
   const handleDeleteEvent = async (eventId: number) => {
     if (!window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
     try {
       await api.get('/spring/calendar/delete', { 
         params: { id: eventId } 
       });
-
       setSelectedDate(null);
       await fetchEvents(activeDate);
     } catch (error) { 
       console.error(error); alert(String(error)); 
-
       if (error && typeof error === 'object' && 'response' in error) {
         const responseData = (error as any).response?.data;
         alert(responseData?.message || "일정 삭제에 실패했습니다.");
@@ -434,13 +474,79 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => { if (activeStartDate) setActiveDate(activeStartDate); };
+  
   const handleDateClick = (date: Date) => {
     setSelectedDate(date);
+    setViewMode('calendar'); 
     setIsAddingEvent(false);
     setEditingEvent(null);
-    setIsSearching(false);
+  };
+  
+  const handleChangeViewMode = (mode: 'calendar' | 'ai' | 'search') => {
+    setViewMode(mode);
+    setSelectedDate(null);
+    setIsAddingEvent(false);
+    setEditingEvent(null);
+    setSearchTerm('');
   };
 
+  // --- (최종 수정) AI 프롬프트 제출 핸들러 ---
+  const handleAISubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const promptText = aiPrompt.trim();
+
+    // 2. localStorage에서 토큰(accessToken)과 이메일(userEmail)을 직접 가져옵니다
+    const token = localStorage.getItem("accessToken"); 
+    const email = localStorage.getItem("userEmail"); // userEmail은 이미 컴포넌트 상단에 있음
+
+    // 3. userEmail과 token 존재 여부 확인
+    if (!promptText || !email || !token) {
+      alert("AI 비서 사용을 위해 로그인이 필요합니다.");
+      return;
+    }
+
+    setIsAILoading(true);
+    setAiPrompt(''); 
+    setChatMessages(prev => [...prev, { role: 'user', content: promptText }]);
+
+    const currentDate = new Date().toISOString();
+    
+    // 4. payload에 userEmail과 accessToken을 포함
+    const payload = {
+        uId: email, // localStorage에서 가져온 이메일
+        prompt: promptText,
+        currentDate: currentDate,
+        accessToken: token // localStorage에서 가져온 토큰
+    };
+
+    try {
+        // (중요) 이 URL을 EC2의 Public IP로 변경하세요
+        const response = await axios.post('http://3.87.230.137:8001/ai/process', payload);
+        
+        const { message, tool_used } = response.data;
+        
+        setChatMessages(prev => [...prev, { role: 'ai', content: message }]);
+        
+        if (tool_used) {
+            console.log("AI가 도구를 사용하여 캘린더를 새로고침합니다.");
+            await fetchEvents(activeDate);
+        }
+
+    } catch (error: any) {
+        console.error("AI 프록시 서버(EC2) 호출에 실패했습니다:", error);
+        let errorMessage = "AI 서버(EC2)와 통신 중 오류가 발생했습니다. (방화벽 8001 포트 확인)";
+        if (error.response && error.response.data && error.response.data.message) {
+            errorMessage = error.response.data.message;
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        setChatMessages(prev => [...prev, { role: 'ai', content: `오류: ${errorMessage}` }]);
+    } finally {
+        setIsAILoading(false);
+    }
+  };
+
+  // --- (변경 없음) ---
   const filteredEvents = useMemo(() => {
     if (!activeFilterTName) {
       return events;
@@ -456,21 +562,16 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const renderTileContent = ({ date, view }: { date: Date, view: string }) => {
       if (view !== 'month') return null;
-
       const holidayInfo = hd.isHoliday(date);
       const isPublicHoliday = holidayInfo && holidayInfo.length > 0 && holidayInfo[0].type === 'public';
-
       const dayEvents = filteredEvents.filter(event => {
           const dayStart = new Date(date);
           dayStart.setHours(0, 0, 0, 0);
           const dayEnd = new Date(date);
           dayEnd.setHours(23, 59, 59, 999);
-          
           return event.startDate <= dayEnd && event.endDate >= dayStart;
       });
-
       const maxEventsToShow = isPublicHoliday ? 1 : 2;
-
       return (
           <>
               {isPublicHoliday && (<HolidayName title={holidayInfo[0].name}>{holidayInfo[0].name}</HolidayName>)}
@@ -496,7 +597,63 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
       return event.startDate <= dayEnd && event.endDate >= dayStart;
   }) : [];
 
+  // --- (변경 없음) renderRightPanelContent ---
   const renderRightPanelContent = () => {
+    
+    if (viewMode === 'ai') {
+      return (
+        <AIChatPanel>
+          <DetailsHeader>AI 비서 🤖</DetailsHeader>
+          <AIMessageHistory ref={ChatHistoryRef}>
+            {chatMessages.map((msg, index) => (
+              <AIMessage key={index} role={msg.role}>{msg.content}</AIMessage>
+            ))}
+            {isAILoading && <AITypingIndicator>AI가 생각 중입니다...</AITypingIndicator>}
+          </AIMessageHistory>
+          <AIChatForm onSubmit={handleAISubmit}>
+            <AIChatInput 
+              type="text" 
+              placeholder="예: 내일 3시 30분 팀 미팅"
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              disabled={isAILoading}
+            />
+            <AIChatButton type="submit" disabled={isAILoading}>
+              {isAILoading ? '...' : '전송'}
+            </AIChatButton>
+          </AIChatForm>
+        </AIChatPanel>
+      );
+    }
+
+    if (viewMode === 'search') {
+      return (
+          <>
+              <DetailsHeader>팀 일정 필터</DetailsHeader>
+              <SearchContainer>
+                  <SearchInput
+                      type="text"
+                      placeholder="보고싶은 팀 일정을 입력해주세요."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+              </SearchContainer>
+              <TeamListContainer>
+                  {allTeamNames
+                      .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(name => (
+                          <TeamButton key={name} onClick={() => {
+                              setActiveFilterTName(name);
+                              setViewMode('calendar'); 
+                          }}>
+                              {name}
+                          </TeamButton>
+                      ))}
+              </TeamListContainer>
+          </>
+      );
+    }
+    
     if (isAddingEvent || editingEvent) {
       const isEditMode = !!editingEvent;
       const currentEventData = isEditMode ? editingEvent : newEvent;
@@ -506,61 +663,32 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         setIsAddingEvent(false);
         setEditingEvent(null);
       };
-
-  return (
-    <>
-        <DetailsHeader>{isEditMode ? '일정 수정' : '새 일정 추가'}</DetailsHeader>
-        <Form onSubmit={handleSubmit}>
-            <FormGroup><label htmlFor="title">제목</label><input type="text" name="title" id="title" value={currentEventData.title} onChange={handleChange} required /></FormGroup>
-            <FormGroup><FormRow><label>하루 종일</label><SwitchLabel><SwitchInput type="checkbox" name="isAllDay" checked={currentEventData.isAllDay} onChange={handleChange} /><SwitchSlider /></SwitchLabel></FormRow></FormGroup>
-            <FormGroup>
-                <label htmlFor="startDate">시작</label>
-                <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="startDate" id="startDate"
-                    value={currentEventData.isAllDay ? toDateInputString(currentEventData.startDate) : toDateTimeLocalString(currentEventData.startDate)}
-                    onChange={handleChange} />
-            </FormGroup>
-            <FormGroup>
-                <label htmlFor="endDate">종료</label>
-                <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="endDate" id="endDate"
-                    value={currentEventData.isAllDay ? toDateInputString(currentEventData.endDate) : toDateTimeLocalString(currentEventData.endDate)}
-                    onChange={handleChange} />
-            </FormGroup>
-            <FormGroup><label htmlFor="description">상세 설명</label><textarea name="description" id="description" rows={4} value={currentEventData.description} onChange={handleChange}></textarea></FormGroup>
-            <ButtonContainer style={{ marginTop: 'auto' }}>
-                <ActionButton type="submit">저장</ActionButton>
-                <CloseButton type="button" onClick={handleCancel}>취소</CloseButton>
-            </ButtonContainer>
-        </Form>
+      return (
+        <>
+            <DetailsHeader>{isEditMode ? '일정 수정' : '새 일정 추가'}</DetailsHeader>
+            <Form onSubmit={handleSubmit}>
+                <FormGroup><label htmlFor="title">제목</label><input type="text" name="title" id="title" value={currentEventData.title} onChange={handleChange} required /></FormGroup>
+                <FormGroup><FormRow><label>하루 종일</label><SwitchLabel><SwitchInput type="checkbox" name="isAllDay" checked={currentEventData.isAllDay} onChange={handleChange} /><SwitchSlider /></SwitchLabel></FormRow></FormGroup>
+                <FormGroup>
+                    <label htmlFor="startDate">시작</label>
+                    <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="startDate" id="startDate"
+                        value={currentEventData.isAllDay ? toDateInputString(currentEventData.startDate) : toDateTimeLocalString(currentEventData.startDate)}
+                        onChange={handleChange} />
+                </FormGroup>
+                <FormGroup>
+                    <label htmlFor="endDate">종료</label>
+                    <input type={currentEventData.isAllDay ? 'date' : 'datetime-local'} name="endDate" id="endDate"
+                        value={currentEventData.isAllDay ? toDateInputString(currentEventData.endDate) : toDateTimeLocalString(currentEventData.endDate)}
+                        onChange={handleChange} />
+                </FormGroup>
+                <FormGroup><label htmlFor="description">상세 설명</label><textarea name="description" id="description" rows={4} value={currentEventData.description} onChange={handleChange}></textarea></FormGroup>
+                <ButtonContainer style={{ marginTop: 'auto' }}>
+                    <ActionButton type="submit">저장</ActionButton>
+                    <CloseButton type="button" onClick={handleCancel}>취소</CloseButton>
+                </ButtonContainer>
+            </Form>
         </>
       );
-    }
-
-    if (isSearching) {
-        return (
-            <>
-                <SearchContainer>
-                    <SearchInput
-                        type="text"
-                        placeholder="보고싶은 팀 일정을 입력해주세요."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </SearchContainer>
-                <TeamListContainer>
-                    {allTeamNames
-                        .filter(name => name.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .map(name => (
-                            <TeamButton key={name} onClick={() => {
-                                setActiveFilterTName(name);
-                                setIsSearching(false);
-                                setSearchTerm('');
-                            }}>
-                                {name}
-                            </TeamButton>
-                        ))}
-                </TeamListContainer>
-            </>
-        );
     }
 
     if (selectedDate) {
@@ -590,7 +718,7 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
               </EventDetailCard>
             ))
           ) : (
-            <EmptyPanel>
+            <EmptyPanel style={{ justifyContent: 'flex-start', paddingTop: '20px' }}>
                 <p>등록된 일정이 없습니다.</p>
                 <AddEventButton onClick={handleShowAddForm}>새 일정 추가</AddEventButton>
             </EmptyPanel>
@@ -649,9 +777,19 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </CalendarContainer>
 
         <RightPanelContainer>
-          {!isSearching && !activeFilterTName && (
-            <SearchIcon onClick={() => setIsSearching(prev => !prev)}>🔍</SearchIcon>
-          )}
+          <IconContainer>
+            {viewMode === 'calendar' ? (
+              <>
+                <TopIcon title="AI 비서" onClick={() => handleChangeViewMode('ai')}>🤖</TopIcon>
+                <TopIcon title="팀 필터" onClick={() => handleChangeViewMode('search')}>🔍</TopIcon>
+              </>
+            ) : (
+              <TopIcon title="캘린더로 돌아가기" onClick={() => handleChangeViewMode('calendar')}>
+                ❌
+              </TopIcon>
+            )}
+          </IconContainer>
+          
           {renderRightPanelContent()}
         </RightPanelContainer>
       </ModalContent>

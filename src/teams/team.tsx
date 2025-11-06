@@ -3,7 +3,6 @@ import { Socket } from 'socket.io-client';
 import Draggable from 'react-draggable';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import api from '../api';
 import {
   Container, SidebarContainer, SidebarToggle, ProjectHeader, Spacer,
   ParticipantContainer, OverlapAvatarWrapper, UserAvatar, UserName, ProjectList,
@@ -16,7 +15,7 @@ import {
 } from './Team.styles';
 import { useSocketManager } from './hooks/useSocketManager';
 import { useWebRTC } from './hooks/useWebRTC';
-import { useObjectManager, DrawingStroke } from './hooks/useObjectManager';
+import { useObjectManager, DrawingStroke } from './hooks/useObjectManager'; // 🚀 DrawingStroke 타입 임포트
 import TextBoxes from "./components/textBox";
 import VoteBoxes from "./components/voteBox";
 import ImageBoxes from "./components/ImageBox";
@@ -24,7 +23,8 @@ import { VideoGrid } from './components/VideoGrid';
 import SummaryModal from './components/SummaryModal';
 import Calendar from './components/Calendar';
 import CalendarModal from './components/CalendarModal';
-import DrawingCanvas from './components/DrawingCanvas';
+// 🚀 [수정] CanvasControlHandle 타입 임포트
+import DrawingCanvas, { CanvasControlHandle } from './components/DrawingCanvas';
 
 // 캘린더 이벤트 타입
 interface CalendarEvent {
@@ -76,22 +76,16 @@ const Teams: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  
+  // 🚀 [추가] DrawingCanvas의 함수를 호출하기 위한 ref
+  const canvasControlRef = useRef<CanvasControlHandle>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
   
-  const { userId, teamId } = location.state || {}; // 🚀 [수정] 테스트용 하드코딩 제거
-  //const userId = "dg0319@naver.com"; // 테스트용
-  //const teamId = "1"; // 테스트용
-
-  useEffect(() => {
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      alert("로그인이 필요합니다. 로그인 페이지로 이동합니다.");
-      navigate('/login');
-    }
-  }, [navigate]);
-
+  const { userId, teamId } = location.state || {};
+  // const userId = "dg0319@naver.com"; // 테스트용
+  // const teamId = "1"; // 테스트용
 
   // --- 상태 관리 ---
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -131,6 +125,9 @@ const Teams: React.FC = () => {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [showAllEvents, setShowAllEvents] = useState(false);
 
+  // 🚀 [추가] 나가기 버튼을 눌렀을 때, 서버 응답(snapshot-updated)을 기다리기 위한 상태
+  const [isWaitingToLeave, setIsWaitingToLeave] = useState(false);
+
   // --- 훅 초기화 ---
   const { socket } = useSocketManager(String(teamId), userId);
   const socketRef = useRef<Socket | null>(null);
@@ -138,12 +135,14 @@ const Teams: React.FC = () => {
 
   const { inCall, localStream, remoteStreams, cursors, handleStartCall, handleEndCall, broadcastCursorPosition } = useWebRTC(socket, String(teamId), userId, participants);
   
-  const { textBoxes, setTextBoxes, voteBoxes, setVoteBoxes, imageBoxes, setImageBoxes, drawings, setDrawings } = useObjectManager(socket, userId, selectedProjectId);
-  
-  const drawingsRef = useRef(drawings);
-  useEffect(() => {
-    drawingsRef.current = drawings;
-  }, [drawings]);
+  // 🚀 [수정] 'snapshotData'를 useObjectManager에서 받아옴
+  const { 
+    textBoxes, setTextBoxes, 
+    voteBoxes, setVoteBoxes, 
+    imageBoxes, setImageBoxes, 
+    drawings, setDrawings,
+    snapshotData 
+  } = useObjectManager(socket, userId, selectedProjectId);
 
   const otherParticipants = participants.filter(p => p.id !== userId);
   const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
@@ -382,6 +381,41 @@ const Teams: React.FC = () => {
     socket.emit('summarize-request', { pId: selectedProjectId });
   };
 
+  // 🚀 [수정] 캔버스 저장 로직 (스냅샷 전송)
+  // 이제 이 함수는 '전송'만 하고, 응답을 기다리지 않습니다.
+  const saveCanvasSnapshot = useCallback((reason: string) => {
+    if (!socketRef.current || !selectedProjectId) return;
+    
+    // 1. 캔버스에서 Base64 이미지 데이터 가져오기
+    const canvasData = canvasControlRef.current?.getCanvasAsDataURL();
+    
+    // 2. 캔버스 데이터가 비어있지 않으면 전송
+    if (canvasData) {
+      console.log(`Saving canvas snapshot (reason: ${reason})`);
+      socketRef.current.emit('save-drawing-data', {
+        pId: selectedProjectId,
+        canvasData: canvasData, // 🚀 획 배열(JSON)이 아닌 Base64 이미지 전송
+        reason: reason
+      });
+      // 🚀 [중요] setDrawings([])을 여기서 제거합니다.
+      // 서버가 'snapshot-updated'로 응답하면 onInit이 setDrawings([])를 호출할 것입니다.
+    }
+  }, [selectedProjectId]); // 🚀 의존성 배열에서 setDrawings 제거
+
+  // 🚀 [수정] 나가기 버튼 핸들러
+  const handleLeaveProject = useCallback(() => {
+    setShowCreateMenu(false); // 메뉴 닫기
+
+    if (socketRef.current && selectedProjectId !== null && drawings.length > 0) {
+      // 1. 저장할 획이 있음
+      setIsWaitingToLeave(true); // 2. "떠날 준비" 플래그 설정
+      saveCanvasSnapshot('button');  // 3. 저장 요청 전송 (이제 navigate를 기다리지 않음)
+    } else {
+      // 4. 저장할 획이 없으면 즉시 떠남
+      navigate('/projectList');
+    }
+  }, [socketRef, selectedProjectId, drawings, saveCanvasSnapshot, navigate, setIsWaitingToLeave]);
+
   // --- 프로젝트 이름 수정 관련 핸들러 ---
   const handleStartEditing = (project: Project) => {
     setEditingProjectId(project.pId);
@@ -508,35 +542,28 @@ const Teams: React.FC = () => {
     }
   };
 
-  // 🚀 [추가] 서버의 그림 데이터 저장 요청 리스너
+  // 🚀 서버의 그림 데이터 저장 요청 리스너
   useEffect(() => {
     if (!socket || !selectedProjectId) return;
     const handleRequestDrawingData = (data: { reason: string }) => {
-      console.log(`Server requested drawing data (reason: ${data.reason})`);
-      socket.emit('save-drawing-data', {
-        pId: selectedProjectId,
-        canvasData: drawingsRef.current.filter(s => s.pId === selectedProjectId), // 🚀 현재 프로젝트의 획만 전송
-        reason: data.reason
-      });
+      // 🚀 'new-user-join'일 때만 저장 (다른 유저 퇴장 시는 불필요)
+      if (data.reason === 'new-user-join') {
+         saveCanvasSnapshot(data.reason);
+      }
     };
     socket.on('request-drawing-data', handleRequestDrawingData);
     return () => {
       socket.off('request-drawing-data', handleRequestDrawingData);
     };
-  }, [socket, selectedProjectId]); 
+  }, [socket, selectedProjectId, saveCanvasSnapshot]); // 🚀 saveCanvasSnapshot 의존성 추가 
 
-  // 🚀 [추가] 페이지 이탈(나가기) 시 그림 데이터 저장
+  // 🚀 페이지 이탈(나가기) 시 그림 데이터 저장
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (socketRef.current && selectedProjectId !== null) {
-        const currentDrawings = drawingsRef.current.filter(s => s.pId === selectedProjectId);
-        if (currentDrawings.length > 0) {
-          console.log('Leaving page, saving drawings...');
-          socketRef.current.emit('save-drawing-data', {
-            pId: selectedProjectId,
-            canvasData: currentDrawings, // 🚀 획 배열(JSON)을 보냄
-            reason: 'button' // 'button'이 '나가기'를 의미
-          });
+        // 🚀 획이 하나라도 있으면 저장 (이제 이 함수는 즉시 전송만 함)
+        if (drawings.length > 0) { 
+          saveCanvasSnapshot('button'); // 'button'이 '나가기'를 의미
         }
       }
     };
@@ -544,8 +571,18 @@ const Teams: React.FC = () => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [socketRef, selectedProjectId]);
+  }, [socketRef, selectedProjectId, drawings, saveCanvasSnapshot]); // 🚀 drawings, saveCanvasSnapshot 의존성 추가
   
+  // 🚀 [추가] '나가기' 버튼 클릭 후, 서버로부터 스냅샷 업데이트를 수신하면 페이지 이동
+  useEffect(() => {
+    // 1. "나가기 대기" 상태이고
+    // 2. 서버가 "snapshot-updated"를 보내 onInit이 실행되어 drawings가 비워졌다면
+    if (isWaitingToLeave && drawings.length === 0) {
+      // 3. 안전하게 페이지를 떠납니다.
+      navigate('/projectList');
+    }
+  }, [isWaitingToLeave, drawings, navigate]); // drawings 상태가 (onInit에 의해) 변경될 때마다 체크
+
   // --- 렌더링 ---
   if (!userId || !teamId) {
     return <div>프로젝트 정보를 불러오는 중...</div>;
@@ -688,8 +725,9 @@ const Teams: React.FC = () => {
               selectedProjectId={selectedProjectId}
             />
             
-            {/* 🚀 DrawingCanvas에 userId, drawings, setDrawings 전달 */}
+            {/* 🚀 [수정] DrawingCanvas에 ref와 snapshotData 전달 */}
             <DrawingCanvas
+              ref={canvasControlRef}
               socketRef={socketRef}
               selectedProjectId={selectedProjectId}
               userId={userId} 
@@ -699,6 +737,7 @@ const Teams: React.FC = () => {
               isEraserMode={isEraserMode}
               drawings={drawings}
               setDrawings={setDrawings}
+              snapshotData={snapshotData} 
             />
             
             <VideoGrid localStream={localStream} remoteStreams={remoteStreams} />
@@ -712,6 +751,10 @@ const Teams: React.FC = () => {
                   <CreateMenuButton onClick={() => { setIsVoteCreateMode(true); setIsTextMode(false); setShowCreateMenu(false); }}>투표</CreateMenuButton>
                   <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
                   <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
+                  
+                  {/* 🚀 [수정] 나가기 버튼 (핸들러 변경됨) */}
+                  <CreateMenuButton onClick={handleLeaveProject}>나가기</CreateMenuButton>
+
               </CreateMenu>
               )}
               <FloatingButton onClick={() => setShowCreateMenu((v) => !v)}>+</FloatingButton>
