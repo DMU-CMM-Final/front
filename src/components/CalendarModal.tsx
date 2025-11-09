@@ -780,8 +780,12 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
           <IconContainer>
             {viewMode === 'calendar' ? (
               <>
-                <TopIcon title="AI 비서" onClick={() => handleChangeViewMode('ai')}>🤖</TopIcon>
-                <TopIcon title="팀 필터" onClick={() => handleChangeViewMode('search')}>🔍</TopIcon>
+                {activeFilterTName === null && (
+                  <TopIcon title="AI 비서" onClick={() => handleChangeViewMode('ai')}>🤖</TopIcon>
+                )}
+                {activeFilterTName === null && (
+                  <TopIcon title="팀 필터" onClick={() => handleChangeViewMode('search')}>🔍</TopIcon>
+                )}
               </>
             ) : (
               <TopIcon title="캘린더로 돌아가기" onClick={() => handleChangeViewMode('calendar')}>
