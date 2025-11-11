@@ -1,3 +1,4 @@
+// [파일명: team.tsx]
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import Draggable from 'react-draggable';
@@ -15,7 +16,7 @@ import {
 } from './Team.styles';
 import { useSocketManager } from './hooks/useSocketManager';
 import { useWebRTC } from './hooks/useWebRTC';
-import { useObjectManager, DrawingStroke } from './hooks/useObjectManager'; // 🚀 DrawingStroke 타입 임포트
+import { useObjectManager, DrawingStroke } from './hooks/useObjectManager'; 
 import TextBoxes from "./components/textBox";
 import VoteBoxes from "./components/voteBox";
 import ImageBoxes from "./components/ImageBox";
@@ -23,10 +24,12 @@ import { VideoGrid } from './components/VideoGrid';
 import SummaryModal from './components/SummaryModal';
 import Calendar from './components/Calendar';
 import CalendarModal from './components/CalendarModal';
-// 🚀 [수정] CanvasControlHandle 타입 임포트
 import DrawingCanvas, { CanvasControlHandle } from './components/DrawingCanvas';
 
-// 캘린더 이벤트 타입
+// ... (
+//   CalendarEvent, Project, Participant, TextBox 타입, 
+//   parseUTCStringAsLocal, generateColor 함수는 동일
+// ) ...
 interface CalendarEvent {
   eventId: number;
   tId: number | null;
@@ -36,8 +39,6 @@ interface CalendarEvent {
   endDate: Date;
   isAllDay: boolean;
 }
-
-// 기타 타입 정의
 interface Project { pId: number; pName: string; createDate: string; }
 interface Participant { id: string; color: string; }
 interface TextBox {
@@ -47,15 +48,11 @@ interface TextBox {
   width: number; height: number; text: string; color: string; font: string;
   size: number; zIndex?: number; isOptimistic?: boolean;
 }
-
-// UTC 시간 파싱 함수
 const parseUTCStringAsLocal = (dateString: string): Date => {
   if (!dateString) return new Date();
   const parts = dateString.split(/[^0-9]/).map(s => parseInt(s, 10));
   return new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
 };
-
-// 유저 색상 생성 함수
 const generateColor = (id: string) => {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
@@ -69,6 +66,7 @@ const generateColor = (id: string) => {
   return color;
 };
 
+
 const Teams: React.FC = () => {
   const { userEmail } = useAuth();
   const mainAreaRef = useRef<HTMLDivElement>(null);
@@ -77,55 +75,40 @@ const Teams: React.FC = () => {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
   
-  // 🚀 [추가] DrawingCanvas의 함수를 호출하기 위한 ref
   const canvasControlRef = useRef<CanvasControlHandle>(null);
+  const drawingsRef = useRef<DrawingStroke[]>([]);
 
   const navigate = useNavigate();
   const location = useLocation();
   
   const { userId, teamId } = location.state || {};
-  // const userId = "dg0319@naver.com"; // 테스트용
-  // const teamId = "1"; // 테스트용
 
   // --- 상태 관리 ---
+  // ... (다른 상태들) ...
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
-
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [editingProjectName, setEditingProjectName] = useState<string>('');
-  
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isUserListExpanded, setIsUserListExpanded] = useState(false);
-
-  // 모드 관리
   const [isTextMode, setIsTextMode] = useState(false);
   const [isVoteCreateMode, setIsVoteCreateMode] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false); 
-  
-  // 그리기 도구 상태
   const [drawingColor, setDrawingColor] = useState('#000000');
   const [penWidth, setPenWidth] = useState(3);
   const [isEraserMode, setIsEraserMode] = useState(false);
-  
-  // 포커스 상태
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [focusedVoteIdx, setFocusedVoteIdx] = useState<number | null>(null);
   const [focusedImageIdx, setFocusedImageIdx] = useState<number | null>(null);
-
-  // 모달 상태
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [summaryContent, setSummaryContent] = useState('');
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
-  
-  // 캘린더 상태
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [showAllEvents, setShowAllEvents] = useState(false);
-
-  // 🚀 [추가] 나가기 버튼을 눌렀을 때, 서버 응답(snapshot-updated)을 기다리기 위한 상태
   const [isWaitingToLeave, setIsWaitingToLeave] = useState(false);
 
   // --- 훅 초기화 ---
@@ -135,14 +118,13 @@ const Teams: React.FC = () => {
 
   const { inCall, localStream, remoteStreams, cursors, handleStartCall, handleEndCall, broadcastCursorPosition } = useWebRTC(socket, String(teamId), userId, participants);
   
-  // 🚀 [수정] 'snapshotData'를 useObjectManager에서 받아옴
   const { 
     textBoxes, setTextBoxes, 
     voteBoxes, setVoteBoxes, 
     imageBoxes, setImageBoxes, 
     drawings, setDrawings,
     snapshotData 
-  } = useObjectManager(socket, userId, selectedProjectId);
+  } = useObjectManager(socket, userId, selectedProjectId, drawingsRef); 
 
   const otherParticipants = participants.filter(p => p.id !== userId);
   const currentBox = focusedIdx !== null ? textBoxes[focusedIdx] : null;
@@ -171,19 +153,39 @@ const Teams: React.FC = () => {
     };
   }, []);
 
-  // 캘린더 실시간 이벤트 리스너
+  // 🚀 [수정 1] 캘린더 실시간 이벤트 리스너
   useEffect(() => {
     if (!socket || !teamId || !userEmail) return;
 
-    const handleCalendarEventNew = (newEventData: any) => {
-      console.log('새 일정 수신:', newEventData);
+    // 'calendar-event-added' 이벤트 핸들러 (이름 변경)
+    const handleCalendarEventAdded = (newEventData: any) => {
+      console.log('새 일정 수신 (added):', newEventData);
       const processedNewEvent: CalendarEvent = {
         ...newEventData,
         tId: newEventData.tId !== undefined ? newEventData.tId : null,
         startDate: parseUTCStringAsLocal(newEventData.startDate),
         endDate: parseUTCStringAsLocal(newEventData.endDate)
       };
-      setCalendarEvents(prev => [...prev, processedNewEvent]);
+      // 🚀 [수정] 이미 로컬에 가짜 ID로 있는지 확인하는 로직 (선택적)
+      // 만약 모달에서 즉시 추가(onEventAdded)를 다시 쓴다면,
+      // 이 로직은 서버 응답이 왔을 때 가짜 ID를 실제 ID로 교체해줍니다.
+      setCalendarEvents(prev => {
+        // 혹시 모르니, title과 시작시간이 같은 가짜 이벤트가 있는지 확인
+        const potentialFakeEventIndex = prev.findIndex(e => 
+            e.title === processedNewEvent.title && 
+            e.startDate.getTime() === processedNewEvent.startDate.getTime() &&
+            e.eventId > 1000000000 // (Date.now()로 만든 가짜 ID라고 가정)
+        );
+        
+        if (potentialFakeEventIndex > -1) {
+          const newState = [...prev];
+          newState[potentialFakeEventIndex] = processedNewEvent; // 진짜 ID로 교체
+          return newState;
+        } else {
+          // 중복이 아니면 그냥 추가
+          return [...prev, processedNewEvent];
+        }
+      });
     };
     const handleCalendarEventUpdated = (updatedEventData: any) => {
        console.log('수정된 일정 수신:', updatedEventData);
@@ -202,18 +204,34 @@ const Teams: React.FC = () => {
       setCalendarEvents(prev => prev.filter(event => event.eventId !== deletedEventData.eventId));
     };
 
-    socket.on('calendar-event-new', handleCalendarEventNew);
+    // 🚀 [수정] 'calendar-event-new' -> 'calendar-event-added'로 변경
+    socket.on('calendar-event-added', handleCalendarEventAdded);
     socket.on('calendar-event-updated', handleCalendarEventUpdated);
     socket.on('calendar-event-deleted', handleCalendarEventDeleted);
 
     return () => {
-      socket.off('calendar-event-new', handleCalendarEventNew);
+      // 🚀 [수정] 'calendar-event-new' -> 'calendar-event-added'로 변경
+      socket.off('calendar-event-added', handleCalendarEventAdded);
       socket.off('calendar-event-updated', handleCalendarEventUpdated);
       socket.off('calendar-event-deleted', handleCalendarEventDeleted);
     };
   }, [socket, teamId, userEmail]);
 
-  // 캘린더 초기 로드 및 월 변경 리스너
+  // ... (
+  //   캘린더 초기 로드 useEffect, handleAttributeChange, 
+  //   잘못된 접근 방지 useEffect, 커서 위치 useEffect,
+  //   room-info, user-joined, user-left, summarize-result 리스너 useEffect,
+  //   project-added, project-renamed, project-deleted 리스너 useEffect,
+  //   handleSummaryRequest, saveCanvasSnapshot, handleLeaveProject,
+  //   프로젝트 이름 수정 관련 핸들러 5개,
+  //   handleSelectProject, handleCreateProject, handleDeleteProject,
+  //   getMaxZIndex, handleMainAreaClick, handleFileChange,
+  //   request-drawing-data 리스너 useEffect,
+  //   beforeunload 리스너 useEffect,
+  //   isWaitingToLeave 리스너 useEffect,
+  //   return (렌더링) 부분
+  //   ... 은 모두 동일합니다 ...
+  // ) ...
   useEffect(() => {
     if (!socket || !teamId || !userEmail) {
        setCalendarEvents([]);
@@ -228,7 +246,6 @@ const Teams: React.FC = () => {
       }
     };
     fetchCalendarEvents(calendarDate);
-
     const handleGenericCalendarData = (data: any) => {
       let eventList: any[] = [];
       let responseTid: number | null = null;
@@ -250,17 +267,13 @@ const Teams: React.FC = () => {
       }));
       setCalendarEvents(processedEvents);
     };
-
     socket.on('calendar-data', handleGenericCalendarData);
     socket.on('calendar-all-data', handleGenericCalendarData);
-
     return () => {
       socket.off('calendar-data', handleGenericCalendarData);
       socket.off('calendar-all-data', handleGenericCalendarData);
     };
   }, [calendarDate, showAllEvents, socket, teamId, userEmail]);
-
-  // 텍스트 상자 속성 변경 핸들러
   const handleAttributeChange = (attribute: 'size' | 'color' | 'font', value: any) => {
     setTextBoxes(prev => {
       const boxToUpdate = prev[focusedIdx!];
@@ -280,16 +293,12 @@ const Teams: React.FC = () => {
       );
     });
   };
-
-  // 잘못된 접근 방지
   useEffect(() => {
     if (!userId || !teamId) {
       alert("잘못된 접근입니다. 프로젝트 목록으로 돌아갑니다.");
       navigate('/projectList');
     }
   }, [userId, teamId, navigate]);
-
-  // 커서 위치 브로드캐스트
   useEffect(() => {
     const area = mainAreaRef.current;
     if (!area) return;
@@ -309,8 +318,6 @@ const Teams: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
     };
   }, [broadcastCursorPosition]);
-
-  // 방 정보, 유저 입장/퇴장, 요약 결과 리스너
   useEffect(() => {
     if (!socket) return;
     const handleRoomInfo = (data: { users?: string[], projects?: Project[] }) => {
@@ -346,8 +353,6 @@ const Teams: React.FC = () => {
       socket.off('summarize-result', handleSummaryResult);
     };
   }, [socket, userId, teamId]);
-
-  // 프로젝트 생성/수정/삭제 리스너
   useEffect(() => {
     if (!socket) return;
     socket.on('project-added', (newProject: Project) => setProjects(prev => [...prev, newProject]));
@@ -367,8 +372,6 @@ const Teams: React.FC = () => {
       socket.off('project-deleted');
     };
   }, [socket, selectedProjectId, editingProjectId]);
-  
-  // AI 요약 요청
   const handleSummaryRequest = () => {
     if (!socket || !selectedProjectId) {
       alert("프로젝트를 먼저 선택해주세요.");
@@ -380,43 +383,27 @@ const Teams: React.FC = () => {
     setShowCreateMenu(false);
     socket.emit('summarize-request', { pId: selectedProjectId });
   };
-
-  // 🚀 [수정] 캔버스 저장 로직 (스냅샷 전송)
-  // 이제 이 함수는 '전송'만 하고, 응답을 기다리지 않습니다.
   const saveCanvasSnapshot = useCallback((reason: string) => {
     if (!socketRef.current || !selectedProjectId) return;
-    
-    // 1. 캔버스에서 Base64 이미지 데이터 가져오기
     const canvasData = canvasControlRef.current?.getCanvasAsDataURL();
-    
-    // 2. 캔버스 데이터가 비어있지 않으면 전송
     if (canvasData) {
       console.log(`Saving canvas snapshot (reason: ${reason})`);
       socketRef.current.emit('save-drawing-data', {
         pId: selectedProjectId,
-        canvasData: canvasData, // 🚀 획 배열(JSON)이 아닌 Base64 이미지 전송
+        canvasData: canvasData,
         reason: reason
       });
-      // 🚀 [중요] setDrawings([])을 여기서 제거합니다.
-      // 서버가 'snapshot-updated'로 응답하면 onInit이 setDrawings([])를 호출할 것입니다.
     }
-  }, [selectedProjectId]); // 🚀 의존성 배열에서 setDrawings 제거
-
-  // 🚀 [수정] 나가기 버튼 핸들러
+  }, [selectedProjectId]); 
   const handleLeaveProject = useCallback(() => {
-    setShowCreateMenu(false); // 메뉴 닫기
-
-    if (socketRef.current && selectedProjectId !== null && drawings.length > 0) {
-      // 1. 저장할 획이 있음
-      setIsWaitingToLeave(true); // 2. "떠날 준비" 플래그 설정
-      saveCanvasSnapshot('button');  // 3. 저장 요청 전송 (이제 navigate를 기다리지 않음)
+    setShowCreateMenu(false); 
+    if (socketRef.current && selectedProjectId !== null && drawingsRef.current.length > 0) {
+      setIsWaitingToLeave(true); 
+      saveCanvasSnapshot('button');  
     } else {
-      // 4. 저장할 획이 없으면 즉시 떠남
       navigate('/projectList');
     }
-  }, [socketRef, selectedProjectId, drawings, saveCanvasSnapshot, navigate, setIsWaitingToLeave]);
-
-  // --- 프로젝트 이름 수정 관련 핸들러 ---
+  }, [socketRef, selectedProjectId, saveCanvasSnapshot, navigate, setIsWaitingToLeave]); 
   const handleStartEditing = (project: Project) => {
     setEditingProjectId(project.pId);
     setEditingProjectName(project.pName);
@@ -448,41 +435,30 @@ const Teams: React.FC = () => {
       handleCancelEditing();
     }
   };
-  // ---
-
-  // 프로젝트 선택
   const handleSelectProject = useCallback((pId: number) => {
     if (selectedProjectId === pId) return;
     setEditingProjectId(null); 
     setSelectedProjectId(pId);
     socket?.emit('join-project', { pId });
   }, [socket, selectedProjectId]);
-
-  // 프로젝트 생성
   const handleCreateProject = useCallback(() => {
     const name = prompt("새 프로젝트의 이름을 입력하세요:");
     if (name && name.trim()) {
       socket?.emit('project-create', { name: name.trim() });
     }
   }, [socket]);
-
-  // 프로젝트 삭제
   const handleDeleteProject = useCallback((pId: number) => {
     const currentProject = projects.find(p => p.pId === pId);
     if (window.confirm(`'${currentProject?.pName}' 프로젝트를 정말로 삭제하시겠습니까?`)) {
       socket?.emit('project-delete', { pId });
     }
   }, [socket, projects]);
-
-  // Z-Index 계산
   const getMaxZIndex = () => {
     const textMax = textBoxes.length > 0 ? Math.max(0, ...textBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
     const voteMax = voteBoxes.length > 0 ? Math.max(0, ...voteBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
     const imageMax = imageBoxes.length > 0 ? Math.max(0, ...imageBoxes.map((b: any) => b.zIndex ?? 0)) : 0;
     return Math.max(textMax, voteMax, imageMax);
   };
-  
-  // 메인 영역 클릭 (텍스트/투표 상자 생성)
   const handleMainAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === mainAreaRef.current) {
       setFocusedIdx(null);
@@ -523,8 +499,6 @@ const Teams: React.FC = () => {
       });
     }
   };
-  
-  // 이미지 파일 업로드
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedProjectId) return;
@@ -541,12 +515,9 @@ const Teams: React.FC = () => {
       console.error(err);
     }
   };
-
-  // 🚀 서버의 그림 데이터 저장 요청 리스너
   useEffect(() => {
     if (!socket || !selectedProjectId) return;
     const handleRequestDrawingData = (data: { reason: string }) => {
-      // 🚀 'new-user-join'일 때만 저장 (다른 유저 퇴장 시는 불필요)
       if (data.reason === 'new-user-join') {
          saveCanvasSnapshot(data.reason);
       }
@@ -555,15 +526,12 @@ const Teams: React.FC = () => {
     return () => {
       socket.off('request-drawing-data', handleRequestDrawingData);
     };
-  }, [socket, selectedProjectId, saveCanvasSnapshot]); // 🚀 saveCanvasSnapshot 의존성 추가 
-
-  // 🚀 페이지 이탈(나가기) 시 그림 데이터 저장
+  }, [socket, selectedProjectId, saveCanvasSnapshot]); 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (socketRef.current && selectedProjectId !== null) {
-        // 🚀 획이 하나라도 있으면 저장 (이제 이 함수는 즉시 전송만 함)
-        if (drawings.length > 0) { 
-          saveCanvasSnapshot('button'); // 'button'이 '나가기'를 의미
+        if (drawingsRef.current.length > 0) { 
+          saveCanvasSnapshot('button');
         }
       }
     };
@@ -571,19 +539,12 @@ const Teams: React.FC = () => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [socketRef, selectedProjectId, drawings, saveCanvasSnapshot]); // 🚀 drawings, saveCanvasSnapshot 의존성 추가
-  
-  // 🚀 [추가] '나가기' 버튼 클릭 후, 서버로부터 스냅샷 업데이트를 수신하면 페이지 이동
+  }, [socketRef, selectedProjectId, saveCanvasSnapshot]); 
   useEffect(() => {
-    // 1. "나가기 대기" 상태이고
-    // 2. 서버가 "snapshot-updated"를 보내 onInit이 실행되어 drawings가 비워졌다면
-    if (isWaitingToLeave && drawings.length === 0) {
-      // 3. 안전하게 페이지를 떠납니다.
+    if (isWaitingToLeave && drawingsRef.current.length === 0) {
       navigate('/projectList');
     }
-  }, [isWaitingToLeave, drawings, navigate]); // drawings 상태가 (onInit에 의해) 변경될 때마다 체크
-
-  // --- 렌더링 ---
+  }, [isWaitingToLeave, drawings, navigate]); 
   if (!userId || !teamId) {
     return <div>프로젝트 정보를 불러오는 중...</div>;
   }
@@ -674,7 +635,6 @@ const Teams: React.FC = () => {
               <FloatingToolbar ref={toolbarRef}>
                 
                 {isDrawingMode ? (
-                  // --- 1. 그리기 모드 툴바 ---
                   <>
                     <ToolIcon title="펜" onClick={() => setIsEraserMode(false)} style={{ background: !isEraserMode ? COLOR.imgBg : 'transparent' }}>✏️</ToolIcon>
                     <ToolIcon title="지우개" onClick={() => setIsEraserMode(true)} style={{ background: isEraserMode ? COLOR.imgBg : 'transparent' }}>🧼</ToolIcon>
@@ -684,14 +644,12 @@ const Teams: React.FC = () => {
                     <ToolbarInput type="number" value={penWidth} onChange={(e) => setPenWidth(Number(e.target.value))} min="1" max="50" />
                   </>
                 ) : focusedIdx === null ? (
-                  // --- 2. 기본 모드 툴바 ---
                   <>
                     <ToolIcon onClick={() => { setIsTextMode(prev => !prev); setIsVoteCreateMode(false); setIsDrawingMode(false); setIsEraserMode(false); }} title="텍스트 상자 생성">T</ToolIcon>
                     <ToolIcon onClick={() => fileInputRef.current?.click()} title="이미지 추가"><ImageIcon /><input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} /></ToolIcon>
                     <ToolIcon onClick={handleToggleDrawingMode} title="그리기"><PenIcon /></ToolIcon>
                   </>
                 ) : (
-                  // --- 3. 텍스트 포커스 모드 툴바 ---
                   currentBox && (
                     <>
                       <ToolbarLabel>크기:</ToolbarLabel><ToolbarInput type="number" value={currentBox.size} onChange={(e) => handleAttributeChange('size', e.target.value)} min="1" />
@@ -725,7 +683,6 @@ const Teams: React.FC = () => {
               selectedProjectId={selectedProjectId}
             />
             
-            {/* 🚀 [수정] DrawingCanvas에 ref와 snapshotData 전달 */}
             <DrawingCanvas
               ref={canvasControlRef}
               socketRef={socketRef}
@@ -738,6 +695,7 @@ const Teams: React.FC = () => {
               drawings={drawings}
               setDrawings={setDrawings}
               snapshotData={snapshotData} 
+              drawingsRef={drawingsRef} 
             />
             
             <VideoGrid localStream={localStream} remoteStreams={remoteStreams} />
@@ -752,7 +710,6 @@ const Teams: React.FC = () => {
                   <CreateMenuButton onClick={inCall ? handleEndCall : handleStartCall}>{inCall ? '통화 종료' : '화상통화'}</CreateMenuButton>
                   <CreateMenuButton onClick={handleSummaryRequest}>AI 요약</CreateMenuButton>
                   
-                  {/* 🚀 [수정] 나가기 버튼 (핸들러 변경됨) */}
                   <CreateMenuButton onClick={handleLeaveProject}>나가기</CreateMenuButton>
 
               </CreateMenu>
@@ -783,6 +740,7 @@ const Teams: React.FC = () => {
         onMonthChange={setCalendarDate}
         showAllEvents={showAllEvents}
         onToggleShowAll={setShowAllEvents}
+        // 🚀 [수정 2] onEventAdded prop을 다시 전달
         onEventAdded={(newEvent) => setCalendarEvents(prev => [...prev, newEvent])}
       />
     </Container>

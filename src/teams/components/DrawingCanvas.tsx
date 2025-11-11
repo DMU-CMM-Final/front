@@ -16,6 +16,7 @@ interface DrawingCanvasProps {
   drawings: DrawingStroke[]; 
   setDrawings: React.Dispatch<React.SetStateAction<DrawingStroke[]>>;
   snapshotData: string | null;
+  drawingsRef: React.RefObject<DrawingStroke[]>; 
 }
 
 export interface CanvasControlHandle {
@@ -55,30 +56,25 @@ const redrawCanvas = (
   canvas: HTMLCanvasElement, 
   context: CanvasRenderingContext2D,
   snapshotImage: HTMLImageElement | null,
-  drawings: DrawingStroke[],
+  drawings: DrawingStroke[], // 🚀 렌더링을 유발한 'state' prop
   selectedProjectId: number | null
 ) => {
   const scale = window.devicePixelRatio;
 
-  // 1. 캔버스 크기를 항상 현재 DOM 크기에 맞게 설정 (컨텍스트 리셋)
   const domWidth = canvas.offsetWidth;
   const domHeight = canvas.offsetHeight;
   canvas.width = domWidth * scale;
   canvas.height = domHeight * scale;
   
-  // 2. 리셋된 컨텍스트에 항상 스케일과 스타일을 다시 적용
   context.scale(scale, scale);
   context.lineCap = 'round';
-  
-  // 3. 캔버스 초기화 (스케일된 좌표계 기준)
   context.clearRect(0, 0, domWidth, domHeight);
 
-  // 4. 스냅샷(배경) 그리기
   if (snapshotImage && snapshotImage.complete) {
     context.drawImage(snapshotImage, 0, 0, domWidth, domHeight);
   }
 
-  // 5. 최신 획(수정 사항) 덧그리기
+  // 🚀 'drawings' state(prop)를 사용해 캔버스를 그림
   drawings.forEach(stroke => {
     if (stroke.pId === selectedProjectId && stroke.points && stroke.points.length > 0) {
       drawStroke(context, stroke);
@@ -95,9 +91,10 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
   drawingColor,
   penWidth,
   isEraserMode,
-  drawings,
+  drawings, // 렌더링 트리거용 state(prop)
   setDrawings,
-  snapshotData
+  snapshotData,
+  drawingsRef // '진실의 원천' ref
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -106,7 +103,7 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
   
   const [isSnapshotLoaded, setIsSnapshotLoaded] = useState(false);
 
-  // 1. 캔버스 초기 설정 (최초 1회만 실행)
+  // 1. 캔버스 초기 설정
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -117,7 +114,7 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     contextRef.current = context;
   }, []); 
 
-  // 2. 스냅샷 데이터(URL)가 변경될 때만 실행
+  // 2. 스냅샷 데이터(URL) 변경 시
   useEffect(() => {
     if (snapshotData) {
       console.log("DrawingCanvas: New snapshot detected, loading image...");
@@ -144,7 +141,7 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     }
   }, [snapshotData]); 
 
-  // 3. 캔버스를 '다시 그리는' 시점을 명확히 분리
+  // 3. 캔버스 '다시 그리기' (state가 변경될 때마다 실행)
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const context = contextRef.current;
@@ -157,17 +154,17 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     
     console.log("DrawingCanvas: Redrawing canvas...");
     
-    // 캔버스 전체를 다시 그림
+    // 'drawings' state(prop)를 사용해 캔버스를 다시 그립니다.
     redrawCanvas(canvas, context, snapshotImageRef.current, drawings, selectedProjectId);
 
-    // 툴 설정(스타일)은 항상 최신 값으로 복원
+    // 툴 설정 복원
     context.strokeStyle = drawingColor;
     context.lineWidth = penWidth;
     context.globalCompositeOperation = isEraserMode ? 'destination-out' : 'source-over';
     
-  }, [drawings, selectedProjectId, isSnapshotLoaded]); 
+  }, [drawings, selectedProjectId, isSnapshotLoaded, snapshotData, drawingColor, penWidth, isEraserMode]);
 
-  // 4. '툴' 설정이 변경될 때는 캔버스를 리셋하지 않고 '컨텍스트'만 업데이트
+  // 4. '툴' 설정 변경 시
   useEffect(() => {
     const context = contextRef.current;
     if (context) {
@@ -177,11 +174,11 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     }
   }, [drawingColor, penWidth, isEraserMode]); 
 
-  // 🚀 [수정] 5. 캔버스 이미지 저장 (부모가 호출)
+  // 5. 캔버스 이미지 저장 (부모가 호출)
   useImperativeHandle(ref, () => ({
     getCanvasAsDataURL: () => {
-      const canvas = canvasRef.current; // 화면에 보이는 실제 캔버스
-      if (!canvas) {
+      const canvas = canvasRef.current; 
+      if (!canvas || !drawingsRef.current) {
         console.warn("Canvas or context not available for snapshot.");
         return undefined;
       }
@@ -190,7 +187,6 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
 
       const scale = window.devicePixelRatio;
       
-      // 🚀 [수정] 임시 캔버스의 크기를 0이 아닌, '실제 캔버스'의 DOM 크기 기준으로 설정
       const domWidth = canvas.offsetWidth;
       const domHeight = canvas.offsetHeight;
       const pixelWidth = domWidth * scale;
@@ -204,37 +200,31 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
          return undefined;
       }
       
-      // --- 1. 임시 캔버스 크기 설정 ---
       tempCanvas.width = pixelWidth;
       tempCanvas.height = pixelHeight;
-      
-      // --- 2. 임시 캔버스 컨텍스트 설정 ---
       tempContext.scale(scale, scale);
       tempContext.lineCap = 'round';
-      
-      // --- 3. 임시 캔버스 초기화 (DOM 크기 기준) ---
       tempContext.clearRect(0, 0, domWidth, domHeight);
 
-      // --- 4. 스냅샷(배경) 그리기 ---
       if (snapshotImageRef.current && snapshotImageRef.current.complete) {
         tempContext.drawImage(snapshotImageRef.current, 0, 0, domWidth, domHeight);
       }
 
-      // --- 5. 최신 획(수정 사항) 덧그리기 ---
-      drawings.forEach(stroke => {
+      // '진실의 원천'인 ref(drawingsRef.current)를 읽음
+      drawingsRef.current.forEach(stroke => {
         if (stroke.pId === selectedProjectId && stroke.points && stroke.points.length > 0) {
-          drawStroke(tempContext, stroke); // 유틸리티 함수 사용
+          drawStroke(tempContext, stroke);
         }
       });
       
-      // --- 6. 최종 이미지 데이터 URL 반환 ---
       return tempCanvas.toDataURL("image/png");
     }
-  }), [drawings, selectedProjectId, isSnapshotLoaded]); // 의존성은 그대로 유지
+  }), [selectedProjectId, isSnapshotLoaded, drawingsRef]); 
 
   // 6. 로컬 드로잉 이벤트 핸들러
+  
   const startDrawing = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawingMode || !contextRef.current || !selectedProjectId) return;
+    if (!isDrawingMode || !contextRef.current || !selectedProjectId || !drawingsRef.current) return;
     const { offsetX, offsetY } = event.nativeEvent;
     const node = uuidv4();
     const newPoint = { x: offsetX, y: offsetY };
@@ -246,7 +236,11 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     };
 
     localActiveStrokeNode.current = node;
-    setDrawings(prev => [...prev, newStroke]); 
+
+    // (중요) ref를 즉시 업데이트
+    const newState = [...drawingsRef.current, newStroke];
+    drawingsRef.current = newState;
+    setDrawings(newState); // 렌더링 트리거
     
     socketRef.current?.emit('start-drawing', {
       x: offsetX, y: offsetY, pId: selectedProjectId,
@@ -260,21 +254,23 @@ const DrawingCanvas = forwardRef<CanvasControlHandle, DrawingCanvasProps>(({
     localActiveStrokeNode.current = null;
   };
 
+  // 🚀 [수정] draw 함수 오타 수정
   const draw = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const activeNode = localActiveStrokeNode.current;
-    if (!isDrawingMode || !contextRef.current || !activeNode || !selectedProjectId) {
+    if (!isDrawingMode || !contextRef.current || !activeNode || !selectedProjectId || !drawingsRef.current) {
       return; 
     }
     const { offsetX, offsetY } = event.nativeEvent;
     const newPoint: DrawingStrokePoint = { x: offsetX, y: offsetY };
 
-    setDrawings(prev =>
-      prev.map(stroke =>
-        stroke.node === activeNode
-          ? { ...stroke, points: [...stroke.points, newPoint] }
-          : stroke
-      )
+    // (중요) ref를 즉시 업데이트
+    const newState = drawingsRef.current.map(stroke => 
+      stroke.node === activeNode
+        ? { ...stroke, points: [...stroke.points, newPoint] }
+        : stroke // 🚀 오타 수정 (id: stroke -> : stroke)
     );
+    drawingsRef.current = newState;
+    setDrawings(newState); // 렌더링 트리거
     
     socketRef.current?.emit('drawing-event', {
       x: offsetX, y: offsetY, pId: selectedProjectId,

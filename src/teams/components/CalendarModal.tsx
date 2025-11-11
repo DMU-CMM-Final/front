@@ -1,3 +1,4 @@
+// [파일명: CalendarModal.tsx]
 import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import Calendar from 'react-calendar';
@@ -26,10 +27,11 @@ interface Props {
   onMonthChange: (date: Date) => void;
   showAllEvents: boolean;
   onToggleShowAll: (show: boolean) => void;
-  onEventAdded: (newEvent: CalendarEvent) => void;
+  onEventAdded: (newEvent: CalendarEvent) => void; // 🚀 [수정 1] 이 prop을 다시 사용
 }
 
 // --- 스타일 정의 ---
+// ... (스타일 코드는 동일) ...
 const ModalOverlay = styled.div`
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   background-color: rgba(0, 0, 0, 0.5); display: flex; justify-content: center; align-items: center; z-index: 1100;
@@ -152,6 +154,7 @@ const ToggleContainer = styled.div`
 `;
 
 // --- 헬퍼 함수 ---
+// ... (헬퍼 함수 코드는 동일) ...
 const toDateTimeLocalString = (date: Date) => {
   if (!(date instanceof Date) || isNaN(date.getTime())) {
     console.warn("Invalid date passed to toDateTimeLocalString:", date);
@@ -184,7 +187,7 @@ const CalendarModal: React.FC<Props> = ({
   onMonthChange,
   showAllEvents,
   onToggleShowAll,
-  onEventAdded
+  onEventAdded // 🚀 [수정 2] prop을 다시 받음
 }) => {
   const { userEmail } = useAuth();
 
@@ -239,6 +242,7 @@ const CalendarModal: React.FC<Props> = ({
     }));
   };
 
+  // 🚀 [수정 3] handleSaveEvent에서 로컬 생성 로직 복원
   const handleSaveEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!socket || !userEmail || !newEvent.title) {
@@ -274,23 +278,29 @@ const CalendarModal: React.FC<Props> = ({
         uId: userEmail, tId: teamId, title: newEvent.title, description: newEvent.description,
         isAllDay: newEvent.isAllDay, startDate: finalStartDateString, endDate: finalEndDateString,
     };
+    
+    // 1. 서버로 전송
     socket.emit('calendar-new', payload);
 
+    // 2. 🚀 (복원) 로컬에서 임시 이벤트를 만들고 onEventAdded를 호출
+    //    (이래야 화면에 즉시 보임. 단, '가짜 ID' 문제가 발생함)
     const localNewEvent: CalendarEvent = {
-        eventId: Date.now(),
+        eventId: Date.now(), // 👈 가짜 ID (임시)
         tId: teamId,
         title: newEvent.title,
         description: newEvent.description,
-        startDate: new Date(finalStartDate), // Ensure it's a Date object
-        endDate: new Date(finalEndDate),     // Ensure it's a Date object
+        startDate: new Date(finalStartDate),
+        endDate: new Date(finalEndDate),
         isAllDay: newEvent.isAllDay
     };
     console.log("Locally adding event:", localNewEvent);
     onEventAdded(localNewEvent);
 
+    // 3. 폼을 닫습니다.
     setIsAddingEvent(false);
   };
 
+  // ... (handleEditEventChange 및 나머지 코드는 동일) ...
   const handleEditEventChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!editingEvent) return;
     const { name, value, type } = e.target;
@@ -313,7 +323,7 @@ const CalendarModal: React.FC<Props> = ({
 
     const baseStartDate = editingEvent.startDate instanceof Date && !isNaN(editingEvent.startDate.getTime())
                            ? editingEvent.startDate
-                           : new Date(); // Fallback to current date if invalid
+                           : new Date(); 
 
     if (editingEvent.isAllDay) {
         finalStartDate = new Date(baseStartDate);
@@ -324,7 +334,7 @@ const CalendarModal: React.FC<Props> = ({
         finalStartDate = baseStartDate;
         finalEndDate = editingEvent.endDate instanceof Date && !isNaN(editingEvent.endDate.getTime())
                        ? editingEvent.endDate
-                       : new Date(finalStartDate.getTime() + 60 * 60 * 1000); // Fallback if invalid
+                       : new Date(finalStartDate.getTime() + 60 * 60 * 1000); 
     }
     finalStartDateString = formatDateTimeForServer(finalStartDate);
     finalEndDateString = formatDateTimeForServer(finalEndDate);
@@ -341,14 +351,14 @@ const CalendarModal: React.FC<Props> = ({
     };
 
     socket.emit('calendar-update', payload);
-    setEditingEvent(null); // Close edit form after sending update
+    setEditingEvent(null); 
   };
 
   const handleDeleteEvent = (eventId: number) => {
     if (!socket || !window.confirm("정말로 이 일정을 삭제하시겠습니까?")) return;
     socket.emit('calendar-delete', { eventId });
-    setSelectedDate(null); // Clear selection after delete
-    setEditingEvent(null); // Close edit form if open
+    setSelectedDate(null); 
+    setEditingEvent(null); 
   };
 
   const handleActiveStartDateChange = ({ activeStartDate }: { activeStartDate: Date | null }) => {
