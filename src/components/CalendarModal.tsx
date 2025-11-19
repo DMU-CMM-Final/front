@@ -491,60 +491,57 @@ const CalendarModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   // --- (최종 수정) AI 프롬프트 제출 핸들러 ---
-  const handleAISubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const promptText = aiPrompt.trim();
+  // --- (수정) AI 프롬프트 제출 핸들러 ---
+const handleAISubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  const promptText = aiPrompt.trim();
 
-    // 2. localStorage에서 토큰(accessToken)과 이메일(userEmail)을 직접 가져옵니다
-    const token = localStorage.getItem("accessToken"); 
-    const email = localStorage.getItem("userEmail"); // userEmail은 이미 컴포넌트 상단에 있음
+  const token = localStorage.getItem("accessToken"); 
+  const email = localStorage.getItem("userEmail");
 
-    // 3. userEmail과 token 존재 여부 확인
-    if (!promptText || !email || !token) {
-      alert("AI 비서 사용을 위해 로그인이 필요합니다.");
-      return;
-    }
+  if (!promptText || !email || !token) {
+    alert("AI 비서 사용을 위해 로그인이 필요합니다.");
+    return;
+  }
 
-    setIsAILoading(true);
-    setAiPrompt(''); 
-    setChatMessages(prev => [...prev, { role: 'user', content: promptText }]);
+  setIsAILoading(true);
+  setAiPrompt(''); 
+  setChatMessages(prev => [...prev, { role: 'user', content: promptText }]);
 
-    const currentDate = new Date().toISOString();
-    
-    // 4. payload에 userEmail과 accessToken을 포함
-    const payload = {
-        uId: email, // localStorage에서 가져온 이메일
-        prompt: promptText,
-        currentDate: currentDate,
-        accessToken: token // localStorage에서 가져온 토큰
-    };
-
-    try {
-        // (중요) 이 URL을 EC2의 Public IP로 변경하세요
-        const response = await axios.post('http://3.87.230.137:8001/ai/process', payload);
-        
-        const { message, tool_used } = response.data;
-        
-        setChatMessages(prev => [...prev, { role: 'ai', content: message }]);
-        
-        if (tool_used) {
-            console.log("AI가 도구를 사용하여 캘린더를 새로고침합니다.");
-            await fetchEvents(activeDate);
-        }
-
-    } catch (error: any) {
-        console.error("AI 프록시 서버(EC2) 호출에 실패했습니다:", error);
-        let errorMessage = "AI 서버(EC2)와 통신 중 오류가 발생했습니다. (방화벽 8001 포트 확인)";
-        if (error.response && error.response.data && error.response.data.message) {
-            errorMessage = error.response.data.message;
-        } else if (error.message) {
-            errorMessage = error.message;
-        }
-        setChatMessages(prev => [...prev, { role: 'ai', content: `오류: ${errorMessage}` }]);
-    } finally {
-        setIsAILoading(false);
-    }
+  const currentDate = new Date().toISOString(); // 혹은 'YYYY-MM-DD' 형식 권장
+  
+  const payload = {
+      uId: email,
+      prompt: promptText,
+      currentDate: currentDate,
+      accessToken: token 
   };
+
+  try {
+      // AI 서버 호출
+      const response = await axios.post('http://3.87.230.137:8001/ai/process', payload);
+      
+      const { message, tool_used } = response.data;
+      
+      setChatMessages(prev => [...prev, { role: 'ai', content: message }]);
+      
+      // AI가 "나 도구 썼어(DB 바꿨어)"라고 하면, 캘린더 데이터만 다시 가져옴
+      if (tool_used) {
+          console.log("일정이 변경되어 캘린더를 새로고침합니다.");
+          await fetchEvents(activeDate); 
+      }
+
+  } catch (error: any) {
+      console.error("AI 서버 오류:", error);
+      let errorMessage = "AI 처리 중 오류가 발생했습니다.";
+      if (error.response?.data?.detail) {
+          errorMessage = error.response.data.detail;
+      }
+      setChatMessages(prev => [...prev, { role: 'ai', content: `오류: ${errorMessage}` }]);
+  } finally {
+      setIsAILoading(false);
+  }
+};
 
   // --- (변경 없음) ---
   const filteredEvents = useMemo(() => {
